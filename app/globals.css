@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 45 32% 93%;
+  --foreground: 0 0% 8%;
+  --card: 45 32% 93%;
+  --card-foreground: 0 0% 8%;
+  --primary: 0 0% 8%;
+  --primary-foreground: 45 32% 93%;
+  --secondary: 48 95% 67%;
+  --secondary-foreground: 0 0% 8%;
+  --muted: 45 20% 86%;
+  --muted-foreground: 0 0% 39%;
+  --accent: 215 92% 35%;
+  --accent-foreground: 45 32% 93%;
+  --destructive: 359 69% 51%;
+  --destructive-foreground: 45 32% 93%;
+  --border: 0 0% 8%;
+  --input: 0 0% 8%;
+  --ring: 215 92% 35%;
+
+  --paper: #f7f3ea;
+  --paper-2: #eee8dc;
+  --paper-3: #fbf8f0;
+  --ink: #141414;
+  --ink-2: #2a2a2a;
+  --muted-ink: #6b6b6b;
+  --thin: #d4d0c4;
+  --brand-red: #d63031;
+  --brand-blue: #0749a9;
+  --brand-yellow: #fbdd5b;
+  --red: #a6423f;
+  --blue: #2d5b8f;
+  --yellow: #c8ad42;
+  --red-soft: #f7ebe8;
+  --blue-soft: #edf3f8;
+  --yellow-soft: #f7f0d0;
+  --red-line: #bc4844;
+  --blue-line: #2f669b;
+  --yellow-line: #c5a12a;
+  --green: #1f7a4d;
+
+  --font-ui: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  --font-slab: "Arial Black", "Arial Bold", Impact, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+  background-image:
+    radial-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    radial-gradient(rgba(0, 0, 0, 0.02) 1px, transparent 1px);
+  background-position: 0 0, 1px 2px;
+  background-size: 3px 3px, 7px 7px;
+  opacity: 0.5;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+::selection {
+  background: var(--yellow);
+  color: var(--ink);
+}
+
+.slab {
+  font-family: var(--font-slab);
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.screen-safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 76px);
+}
+
+.tap-highlight {
+  -webkit-tap-highlight-color: transparent;
+}
