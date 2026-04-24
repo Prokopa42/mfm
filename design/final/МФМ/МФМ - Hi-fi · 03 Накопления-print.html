@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>МФМ · Hi-fi · Накопления</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Archivo+Black&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink:      #14120d;
+    --ink-80:   #2a2720;
+    --ink-55:   #6a6557;
+    --ink-35:   #9a9483;
+    --ink-18:   #c4bfac;
+    --hair:     #d9d3bc;
+    --thin:     #e3ddc5;
+    --paper:    #f4f1e8;
+    --red:      #c42a2a;
+    --blue:     #0e4fb0;
+    --yellow:   #eccc3a;
+    --yellow-bg:#f5e489;
+
+    --w-hair:   0.5px;
+    --w-reg:    1px;
+    --w-heavy:  1.5px;
+
+    --t-hero:   64px;
+    --t-hero-x: 20px;
+    --t-num-m:  14px;
+    --t-num-s:  12px;
+    --t-eyebrow:9px;
+    --t-body:   11.5px;
+    --t-micro:  9.5px;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{
+    background:#e8e3d0;
+    color:var(--ink);
+    font-family:'JetBrains Mono', ui-monospace, monospace;
+    -webkit-font-smoothing:antialiased;
+    font-feature-settings: "tnum" 1, "ss01" 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .slab{ font-family:'Archivo Black', system-ui; font-weight:900; letter-spacing:-0.02em; }
+  .mono{ font-family:'JetBrains Mono', monospace; }
+  .tnum{ font-variant-numeric: tabular-nums; }
+  .eyebrow{
+    font-family:'Archivo Black', system-ui;
+    font-size: var(--t-eyebrow);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-55);
+  }
+  .eyebrow--ink{ color: var(--ink); }
+  #root{ padding: 48px 32px 72px; max-width: 1440px; margin: 0 auto; }
+
+  @page {
+    size: A3 landscape;
+    margin: 12mm;
+  }
+  @media print {
+    html, body {
+      background: #e8e3d0 !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    #root { padding: 0 !important; max-width: none !important; }
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    header, footer, section, section > div { break-inside: avoid; }
+  }
+</style>
+</head>
+
+<template id="__bundler_thumbnail" data-bg-color="#f4f1e8">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect x="420" y="120" width="360" height="560" fill="#f4f1e8" stroke="#14120d" stroke-width="4"/>
+    <rect x="456" y="210" width="3" height="140" fill="#0e4fb0"/>
+    <text x="480" y="320" font-family="'Archivo Black', sans-serif" font-size="100" fill="#14120d">43 100</text>
+    <path d="M 460 500 Q 540 470 600 460 T 740 420" fill="none" stroke="#14120d" stroke-width="2"/>
+    <path d="M 600 460 L 740 420" fill="none" stroke="#0e4fb0" stroke-width="2" stroke-dasharray="4 4"/>
+    <text x="600" y="600" font-family="'Archivo Black', sans-serif" font-size="22" text-anchor="middle" fill="#14120d">03 · НАКОПЛЕНИЯ</text>
+  </svg>
+</template>
+
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="hifi-primitives.jsx"></script>
+<script type="text/babel" src="hifi-savings.jsx"></script>
+
+<script type="text/babel">
+
+function PageHead() {
+  return (
+    <header style={{ marginBottom: 48, display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'end', gap: 40, borderBottom: '1px solid var(--ink)', paddingBottom: 22 }}>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 8 }}>
+          <span className="slab" style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase' }}>МФМ</span>
+          <div style={{ width: 28, height: 0.5, background: 'var(--ink-55)' }} />
+          <span className="mono" style={{ fontSize: 10, color: 'var(--ink-55)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Hi-fi · 03 · Накопления</span>
+        </div>
+        <h1 className="slab" style={{ fontSize: 40, lineHeight: 1.02, letterSpacing: '-0.015em', maxWidth: 820 }}>
+          Котёл и конверты. Одна сумма — много назначений.
+        </h1>
+        <p className="mono" style={{ fontSize: 12, color: 'var(--ink-55)', marginTop: 14, maxWidth: 720, lineHeight: 1.55 }}>
+          Накопления — один общий котёл. Цели — конверты внутри него. Сумма конвертов никогда не превышает котёл; разница — «не распределено». Экран честно показывает, что все числа ниже hero — это куски одной полосы, а не параллельные деньги.
+        </p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {['01', '02', '03', '04', '05'].map((n, i) => (
+            <div key={i} style={{
+              padding: '5px 9px',
+              border: i === 2 ? '1px solid var(--ink)' : '0.5px solid var(--ink-35)',
+              background: i === 2 ? 'var(--ink)' : 'transparent',
+              color:      i === 2 ? 'var(--paper)' : 'var(--ink-55)',
+            }}>
+              <span className="slab" style={{ fontSize: 9, letterSpacing: '0.14em' }}>{n}</span>
+            </div>
+          ))}
+        </div>
+        <span className="mono" style={{ fontSize: 9.5, color: 'var(--ink-55)', letterSpacing: '0.08em' }}>СЕЙЧАС · ЦИКЛ · НАКОП. · ИСТОРИЯ · НАСТРОЙКИ</span>
+      </div>
+    </header>
+  );
+}
+
+function Callout({ n, title, items }) {
+  return (
+    <div style={{ maxWidth: 320 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+        <span className="slab" style={{ fontSize: 11, letterSpacing: '0.14em' }}>{n}</span>
+        <div style={{ flex: 1, height: 0.5, background: 'var(--ink)' }} />
+      </div>
+      <div className="slab" style={{ fontSize: 16, lineHeight: 1.25, marginBottom: 14, letterSpacing: '-0.01em' }}>{title}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 12, rowGap: 8 }}>
+        {items.map(([k, v], i) => (
+          <React.Fragment key={i}>
+            <span className="eyebrow" style={{ paddingTop: 2, fontSize: 8.5 }}>{k}</span>
+            <span className="mono" style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--ink-80)' }}>{v}</span>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PhoneCaption({ n, label, sublabel, accent }) {
+  return (
+    <div style={{ textAlign: 'center', marginTop: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span className="slab" style={{ fontSize: 10, letterSpacing: '0.18em' }}>{n}</span>
+        <div style={{ width: 12, height: 1, background: 'var(--ink)' }} />
+        <span className="slab" style={{ fontSize: 14, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</span>
+        {accent && <div style={{ width: 8, height: 8, background: accent }} />}
+      </div>
+      <span className="mono" style={{ fontSize: 10, color: 'var(--ink-55)', letterSpacing: '0.02em' }}>{sublabel}</span>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <>
+      <PageHead />
+
+      <section style={{ marginBottom: 40, padding: '18px 20px', border: '0.5px solid var(--ink)', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 24 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 220 }}>
+          <span className="eyebrow eyebrow--ink">Модель</span>
+          <span className="slab" style={{ fontSize: 16, lineHeight: 1.2 }}>Котёл + конверты</span>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--ink-55)', marginTop: 4 }}>инвариант</span>
+          <span className="mono tnum" style={{ fontSize: 11, color: 'var(--ink)' }}>allocated + unallocated ≡ total</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+          {[
+            ['КОТЁЛ',     'Один фактический баланс. Меняется только пополнениями и выводами.'],
+            ['КОНВЕРТЫ',  'Аллокации внутри котла. Перекладка между конвертами не меняет total.'],
+            ['ОСТАТОК',   '«Не распределено» — собственный сегмент; подсветка свободного, а не ошибка.'],
+          ].map(([k, v]) => (
+            <div key={k}>
+              <div className="eyebrow" style={{ fontSize: 8.5, marginBottom: 4 }}>{k}</div>
+              <div className="mono" style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--ink-80)' }}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 340px) auto minmax(280px, 340px)', gap: 56, alignItems: 'start', justifyContent: 'center' }}>
+        <div style={{ paddingTop: 24, display: 'flex', flexDirection: 'column', gap: 28 }}>
+          <Callout n="01" title="Hero — только общий котёл"
+            items={[
+              ['HERO',   '243 100 ₽ — Archivo Black 64, 3 px blue-полоса слева'],
+              ['TICK',   '«номинально» под ink-линией · никаких сумм по целям в этой зоне'],
+              ['REAL',   '«в сегодняшних ₽ 228 400 · −14 700 инфляция» — вторичный вес'],
+              ['RULE',   'hero = total_savings. Точка. Это фиксирует, где «настоящие деньги»'],
+            ]} />
+          <Callout n="02" title="Allocation bar — физическое доказательство"
+            items={[
+              ['BAR',     'Одна полоса, поделённая на сегменты: Подушка · Ноутбук · Отпуск · Не распр.'],
+              ['FREE',    '«Не распределено» — штриховка, а не заливка'],
+              ['LEGEND',  'Под баром — легенда: название · сумма · % от котла'],
+              ['TRIAD',   'Триада чисел: распределено · не распределено · темп котла/мес'],
+              ['PROOF',   '«= 100% от 243 100 ₽» в правом верхнем углу бара — подпись-инвариант'],
+            ]} />
+          <Callout n="03" title="Траектория — тоже про котёл"
+            items={[
+              ['SCOPE',  'График строит total_savings, не отдельные цели'],
+              ['PAST',   '14 недель факта — сплошная 1.2 px ink'],
+              ['FCST',   '24 недели прогноза — пунктир 1 px blue'],
+              ['TODAY',  '1.5 px ink вертикаль + точка + метка «СЕГ»'],
+              ['TARGET', 'Outline-кружок blue на конце + метка «31.12»'],
+              ['PAIR',   'Пара «котёл к 31.12 · номин. 353 400 / в сегодняшних ₽ 331 600»'],
+            ]} />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <HiFiSavings />
+          <PhoneCaption n="04" label="Накопления" sublabel="котёл 243 100 ₽ · темп +20 000 ₽/мес" accent="var(--blue)" />
+        </div>
+
+        <div style={{ paddingTop: 24, display: 'flex', flexDirection: 'column', gap: 28 }}>
+          <Callout n="04" title="Подушка — системный резерв"
+            items={[
+              ['SEPARATE', 'Отдельный блок между графиком и списком целей — не в одном ряду с целями'],
+              ['GLYPH',    'Ромб 1.2 px — собственный символ, отличный от целей'],
+              ['UNIT',     'Подпись в месяцах расходов: «3.2 из 3.0 мес.» — натуральная единица для резерва'],
+              ['BAR',      'Тонкая ink-полоса прогресса; статус ok/low/critical'],
+            ]} />
+          <Callout n="05" title="Карточка цели — ключ «выделено»"
+            items={[
+              ['WORD',     'Слово «выделено» вместо «есть» — ясно: доля общего котла'],
+              ['PROGRESS', '% = allocated / target (не % от котла)'],
+              ['A',        'Ряд A: выделено · цель · разрыв сейчас'],
+              ['B',        'Ряд B: нужный темп · плановый темп — два разных числа рядом'],
+              ['C',        'Ряд C: прогноз к дедлайну · разрыв к дедлайну'],
+              ['STATUS',   '2 px маркер у названия; «в графике / отстаёт / достигнута»'],
+              ['FREE',     'Если плановые темпы ≠ темп котла — dashed-строка «Темп · не распределён в цели»'],
+            ]} />
+          <Callout n="06" title="CTA и цвет"
+            items={[
+              ['PRIMARY',  '«Отложить в котёл» ink/paper — меняет total_savings'],
+              ['SECONDARY','«Распределить» outline blue — двигает деньги между конвертами'],
+              ['LOGIC',    'Физически разные операции — разные кнопки'],
+              ['BLUE',     'Все «в графике» маркеры + прогноз + темп котла'],
+              ['RED',      '«Отстаёт», разрыв, минус инфляции'],
+              ['INK',      'Факт, подушка, достигнутые цели'],
+            ]} />
+        </div>
+      </section>
+
+      <footer style={{ marginTop: 72, paddingTop: 20, borderTop: '0.5px solid var(--ink-35)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="mono" style={{ fontSize: 9.5, color: 'var(--ink-55)', letterSpacing: '0.08em' }}>МФМ · Hi-fi · 03/05 · Накопления</span>
+        <span className="mono" style={{ fontSize: 9.5, color: 'var(--ink-55)', letterSpacing: '0.08em' }}>DRAFT · 24.04.26</span>
+      </footer>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+// Auto-print once fonts + layout settle
+(async () => {
+  try {
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+  } catch (e) {}
+  await new Promise(r => requestAnimationFrame(r));
+  setTimeout(() => window.print(), 700);
+})();
+</script>
+
+</body>
+</html>

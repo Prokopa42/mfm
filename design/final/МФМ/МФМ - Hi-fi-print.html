@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>МФМ · Hi-fi · Главный</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Archivo+Black&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    /* Ink scale — more levels than wireframes, for finer hierarchy */
+    --ink:      #14120d;
+    --ink-80:   #2a2720;
+    --ink-55:   #6a6557;
+    --ink-35:   #9a9483;
+    --ink-18:   #c4bfac;
+    --hair:     #d9d3bc;    /* hairlines on paper */
+    --thin:     #e3ddc5;
+
+    /* Paper — single warm background, no variants */
+    --paper:    #f4f1e8;
+
+    /* Accents — used as signals only */
+    --red:      #c42a2a;
+    --blue:     #0e4fb0;
+    --yellow:   #eccc3a;    /* slightly richer than wireframe */
+    --yellow-bg:#f5e489;    /* soft fill, used once */
+
+    /* Line weights */
+    --w-hair:   0.5px;
+    --w-reg:    1px;
+    --w-heavy:  1.5px;     /* hi-fi softer than wireframe's 2px */
+
+    /* Type scale — tight, deliberate */
+    --t-hero:   64px;       /* main number */
+    --t-hero-x: 20px;       /* ruble */
+    --t-num-m:  14px;       /* inline numbers */
+    --t-num-s:  12px;
+    --t-eyebrow:9px;        /* uppercase labels */
+    --t-body:   11.5px;
+    --t-micro:  9.5px;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{
+    background:#e8e3d0;           /* page bg slightly darker than paper, so phone pops */
+    color:var(--ink);
+    font-family:'JetBrains Mono', ui-monospace, monospace;
+    -webkit-font-smoothing:antialiased;
+    font-feature-settings: "tnum" 1, "ss01" 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .slab{ font-family:'Archivo Black', system-ui; font-weight:900; letter-spacing:-0.02em; }
+  .mono{ font-family:'JetBrains Mono', monospace; }
+  .tnum{ font-variant-numeric: tabular-nums; }
+  .eyebrow{
+    font-family:'Archivo Black', system-ui;
+    font-size: var(--t-eyebrow);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-55);
+  }
+  .eyebrow--ink{ color: var(--ink); }
+  .micro{
+    font-family:'JetBrains Mono', monospace;
+    font-size: var(--t-micro);
+    color: var(--ink-55);
+    letter-spacing: 0.02em;
+  }
+  #root{ padding: 48px 32px 72px; max-width: 1440px; margin: 0 auto; }
+
+  /* ─── PRINT ─────────────────────────────────────────── */
+  @page {
+    size: A3 landscape;
+    margin: 10mm;
+  }
+  @media print {
+    html, body {
+      background: #f4f1e8 !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    body::before { display: none; }
+    #root {
+      padding: 0 !important;
+      max-width: none !important;
+    }
+    /* force colors and shadows off where problematic */
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    /* avoid splitting sections */
+    section, header, footer { break-inside: avoid; page-break-inside: avoid; }
+    /* tune sizes so everything fits at A3 landscape (~420×297mm) */
+    .print-only { display: block !important; }
+    /* scale the whole sheet slightly for tighter fit */
+    body {
+      zoom: 0.72;
+    }
+  }
+</style>
+</head>
+
+<template id="__bundler_thumbnail" data-bg-color="#f4f1e8">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect x="420" y="120" width="360" height="560" fill="#f4f1e8" stroke="#14120d" stroke-width="4"/>
+    <rect x="456" y="210" width="3" height="140" fill="#eccc3a"/>
+    <text x="480" y="320" font-family="'Archivo Black', sans-serif" font-size="100" fill="#14120d">1 130</text>
+    <text x="480" y="360" font-family="monospace" font-size="20" fill="#6a6557">₽ сегодня</text>
+    <rect x="456" y="480" width="288" height="3" fill="#14120d"/>
+    <text x="600" y="560" font-family="'Archivo Black', sans-serif" font-size="24" text-anchor="middle" fill="#14120d">МФМ · Hi-fi</text>
+  </svg>
+</template>
+
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="hifi-primitives.jsx"></script>
+<script type="text/babel" src="hifi-dashboard.jsx"></script>
+<script type="text/babel" src="hifi-app.jsx"></script>
+
+<script type="text/babel">
+// Auto-print: wait for fonts, React render, and a safety buffer
+(async () => {
+  // wait for fonts
+  if (document.fonts && document.fonts.ready) {
+    await document.fonts.ready;
+  }
+  // wait for React to paint — next animation frame + buffer
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  // wait for #root to have content
+  const root = document.getElementById('root');
+  let tries = 0;
+  while (root && root.children.length === 0 && tries < 40) {
+    await new Promise((r) => setTimeout(r, 100));
+    tries++;
+  }
+  // safety buffer
+  await new Promise((r) => setTimeout(r, 500));
+  window.print();
+})();
+</script>
+
+</body>
+</html>

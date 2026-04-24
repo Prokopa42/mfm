@@ -1,0 +1,1462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Safe to Spend — Wireframes</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@400;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink: #1a1a1a;
+    --ink-2: #2a2a2a;
+    --muted: #6b6b6b;
+    --muted-2: #9a9a9a;
+    --paper: #fbfaf6;
+    --paper-2: #f3f1ea;
+    --rule: #1a1a1a;
+    --thin: #c9c6bc;
+    --accent: #e85d2b;      /* warm orange, sketchy highlighter */
+    --accent-2: #1f6feb;    /* blue ink */
+    --warn: #d4a017;
+    --risk: #c93f2f;
+    --ok: #2f7d4f;
+    --yellow: #ffd65c;
+    --pink: #ffb3a7;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--paper); color:var(--ink);
+    font-family:'Kalam', 'Caveat', sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* subtle paper grain */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image:
+      radial-gradient(rgba(0,0,0,0.025) 1px, transparent 1px),
+      radial-gradient(rgba(0,0,0,0.018) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    mix-blend-mode: multiply;
+    opacity:.6;
+  }
+  #root{ position:relative; z-index:1; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+// Sketchy primitives: hand-drawn-feeling rect, phone frame, arrows, scribbles.
+
+// ── Rough rectangle path via manual noise
+function roughRectPath(x, y, w, h, r = 8, seed = 1, jitter = 1.2) {
+  const rand = (n) => {
+    const s = Math.sin(seed * 9301 + n * 49297) * 233280;
+    return (s - Math.floor(s)) * 2 - 1; // -1..1
+  };
+  const j = (n) => rand(n) * jitter;
+  // four corners
+  const x1 = x + j(1), y1 = y + j(2);
+  const x2 = x + w + j(3), y2 = y + j(4);
+  const x3 = x + w + j(5), y3 = y + h + j(6);
+  const x4 = x + j(7), y4 = y + h + j(8);
+  // control points for gentle wobble on edges
+  const cp = (a, b, c, d, n) => `Q ${(a + c) / 2 + j(n) * 1.4} ${(b + d) / 2 + j(n + 1) * 1.4} ${c} ${d}`;
+  return `M ${x1} ${y1}
+          ${cp(x1, y1, x2, y2, 10)}
+          ${cp(x2, y2, x3, y3, 12)}
+          ${cp(x3, y3, x4, y4, 14)}
+          ${cp(x4, y4, x1, y1, 16)} Z`;
+}
+
+// Sketch Box — hand-drawn border box. Children render inside.
+function SketchBox({ children, style = {}, fill = 'transparent', stroke = 'var(--ink)', strokeW = 1.6, radius = 12, seed = 1, dashed = false, highlight = null, pad = 14 }) {
+  const ref = React.useRef(null);
+  const [dims, setDims] = React.useState({ w: 0, h: 0 });
+  React.useLayoutEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver(() => {
+      const r = ref.current.getBoundingClientRect();
+      setDims({ w: r.width, h: r.height });
+    });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  const { w, h } = dims;
+  return (
+    <div ref={ref} style={{ position: 'relative', padding: pad, ...style }}>
+      {w > 0 && (
+        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
+          {highlight && (
+            <path d={roughRectPath(3, 3, w - 6, h - 6, radius, seed + 30, 1.6)}
+                  fill={highlight} opacity="0.55" />
+          )}
+          <path d={roughRectPath(2, 2, w - 4, h - 4, radius, seed, 1.2)}
+                fill={fill} stroke={stroke} strokeWidth={strokeW}
+                strokeDasharray={dashed ? '5 4' : 'none'} strokeLinejoin="round" />
+          <path d={roughRectPath(2.5, 2.5, w - 5, h - 5, radius, seed + 11, 0.9)}
+                fill="none" stroke={stroke} strokeWidth={strokeW * 0.6} opacity="0.55" strokeLinejoin="round" />
+        </svg>
+      )}
+      <div style={{ position: 'relative', zIndex: 1 }}>{children}</div>
+    </div>
+  );
+}
+
+// Squiggle underline
+function Squiggle({ width = 80, color = 'var(--accent)', h = 6 }) {
+  const pts = 14, amp = h / 2.4;
+  let d = `M 0 ${h / 2}`;
+  for (let i = 1; i <= pts; i++) {
+    const x = (i / pts) * width;
+    const y = h / 2 + Math.sin(i * 1.3) * amp + (Math.random() - 0.5) * 0.8;
+    d += ` L ${x} ${y}`;
+  }
+  return <svg width={width} height={h} style={{ display: 'block' }}><path d={d} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" /></svg>;
+}
+
+// Hand-drawn arrow ↗
+function Arrow({ from, to, color = 'var(--ink)', w = 1.6, curve = 20, label = null }) {
+  const [x1, y1] = from, [x2, y2] = to;
+  const mx = (x1 + x2) / 2 + curve, my = (y1 + y2) / 2 - curve;
+  const ang = Math.atan2(y2 - my, x2 - mx);
+  const ah = 9;
+  const ax1 = x2 - Math.cos(ang - 0.4) * ah;
+  const ay1 = y2 - Math.sin(ang - 0.4) * ah;
+  const ax2 = x2 - Math.cos(ang + 0.4) * ah;
+  const ay2 = y2 - Math.sin(ang + 0.4) * ah;
+  return (
+    <g>
+      <path d={`M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round" />
+      <path d={`M ${ax1} ${ay1} L ${x2} ${y2} L ${ax2} ${ay2}`} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" />
+      {label && <text x={mx} y={my - 4} fontFamily="Caveat" fontSize="16" fill={color} textAnchor="middle">{label}</text>}
+    </g>
+  );
+}
+
+// Hatch fill (diagonal lines) inside a rect
+function Hatch({ w, h, spacing = 6, color = 'var(--ink)', opacity = 0.25, angle = 45 }) {
+  const lines = [];
+  const diag = Math.hypot(w, h);
+  const n = Math.ceil(diag / spacing) + 4;
+  for (let i = -n; i < n; i++) {
+    lines.push(<line key={i} x1={i * spacing} y1={-h} x2={i * spacing + h} y2={h * 2}
+      stroke={color} strokeWidth="1" opacity={opacity} transform={`rotate(${angle})`} />);
+  }
+  return (
+    <svg width={w} height={h} style={{ position: 'absolute', inset: 0 }}>
+      <defs><clipPath id="hclip"><rect x="0" y="0" width={w} height={h} /></clipPath></defs>
+      <g clipPath="url(#hclip)">{lines}</g>
+    </svg>
+  );
+}
+
+// Phone frame — low-fi. Screen area is children.
+function Phone({ children, label = null, w = 300, h = 620, seed = 1, state = null }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      <div style={{ position: 'relative', width: w, height: h }}>
+        {/* outer body */}
+        <svg width={w + 10} height={h + 10} viewBox={`0 0 ${w + 10} ${h + 10}`}
+             style={{ position: 'absolute', left: -5, top: -5, overflow: 'visible' }}>
+          <path d={roughRectPath(3, 3, w + 4, h + 4, 34, seed, 1.1)} fill="#fff"
+                stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round" />
+          <path d={roughRectPath(4, 4, w + 2, h + 2, 33, seed + 7, 0.7)} fill="none"
+                stroke="var(--ink)" strokeWidth="1" opacity="0.55" strokeLinejoin="round" />
+        </svg>
+        {/* notch */}
+        <div style={{
+          position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+          width: 74, height: 18, borderRadius: 12, background: 'var(--ink)', zIndex: 2,
+        }} />
+        {/* screen */}
+        <div style={{
+          position: 'absolute', inset: '32px 14px 20px 14px',
+          borderRadius: 22, overflow: 'hidden',
+          background: 'var(--paper)',
+          display: 'flex', flexDirection: 'column',
+        }}>
+          {/* status bar */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '6px 16px 4px', fontFamily: 'Kalam', fontSize: 11, color: 'var(--muted)',
+          }}>
+            <span>9:41</span>
+            <span style={{ letterSpacing: 1 }}>●●● ▲ ▮</span>
+          </div>
+          <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+            {children}
+          </div>
+          {/* home indicator */}
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0 6px' }}>
+            <div style={{ width: 80, height: 3, borderRadius: 3, background: 'var(--ink)' }} />
+          </div>
+        </div>
+      </div>
+      {label && (
+        <div style={{ fontFamily: 'Caveat', fontSize: 22, color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span>— {label} —</span>
+          {state && <Pill>{state}</Pill>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Pill({ children, color = 'var(--ink)', bg = 'transparent' }) {
+  return (
+    <span style={{
+      fontFamily: 'Kalam', fontSize: 12, fontWeight: 700,
+      letterSpacing: 0.3, textTransform: 'uppercase',
+      padding: '3px 10px', borderRadius: 20, color, background: bg,
+      border: `1.3px solid ${color}`,
+    }}>{children}</span>
+  );
+}
+
+// Handwritten label shortcut
+function H({ children, size = 16, color = 'var(--ink)', weight = 400, style = {} }) {
+  return <span style={{ fontFamily: 'Kalam', fontSize: size, color, fontWeight: weight, ...style }}>{children}</span>;
+}
+function C({ children, size = 22, color = 'var(--ink)', weight = 600, style = {} }) {
+  return <span style={{ fontFamily: 'Caveat', fontSize: size, color, fontWeight: weight, lineHeight: 1.1, ...style }}>{children}</span>;
+}
+
+// Big number placeholder — draws the number in a huge hand style
+function BigNumber({ value, currency = '$', size = 64, color = 'var(--ink)', strike = false }) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 2, position: 'relative' }}>
+      <span style={{ fontFamily: 'Caveat', fontSize: size * 0.55, color, marginRight: 3, alignSelf: 'flex-start', marginTop: size * 0.2 }}>{currency}</span>
+      <span style={{ fontFamily: 'Caveat', fontWeight: 700, fontSize: size, color, lineHeight: 0.9, letterSpacing: -1 }}>{value}</span>
+      {strike && (
+        <span style={{ position: 'absolute', left: -4, right: -4, top: '50%', height: 2, background: 'var(--risk)', transform: 'rotate(-3deg)' }} />
+      )}
+    </div>
+  );
+}
+
+// Checkbox / radio sketch
+function Check({ on = false, size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" style={{ flexShrink: 0 }}>
+      <path d={roughRectPath(1, 1, 12, 12, 3, 2, 0.6)} fill="none" stroke="var(--ink)" strokeWidth="1.4" />
+      {on && <path d="M3 7.5 L6 10 L11 4" fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+    </svg>
+  );
+}
+
+// Segmented tab-bar for bottom of phone
+function TabBar({ active = 0, items = ['Home', 'Runway', 'Savings', 'History', 'Settings'] }) {
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'space-around', alignItems: 'center',
+      padding: '8px 6px 6px', borderTop: '1.5px solid var(--ink)',
+      background: 'var(--paper)',
+    }}>
+      {items.map((t, i) => (
+        <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, opacity: i === active ? 1 : 0.5 }}>
+          <svg width="18" height="18" viewBox="0 0 18 18">
+            <path d={roughRectPath(2, 2, 14, 14, 3, i + 4, 0.6)} fill="none" stroke="var(--ink)" strokeWidth="1.3" />
+            {i === active && <circle cx="9" cy="9" r="2.5" fill="var(--ink)" />}
+          </svg>
+          <H size={10} weight={i === active ? 700 : 400}>{t}</H>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+Object.assign(window, {
+  SketchBox, Squiggle, Arrow, Hatch, Phone, Pill, H, C, BigNumber, Check, TabBar,
+  roughRectPath,
+});
+
+</script>
+<script type="text/babel">
+// Spec document: Product logic, Data model, Formulas, Edge cases, Screen architecture.
+
+function SpecDoc() {
+  const sectionStyle = { marginBottom: 56 };
+  return (
+    <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 48px 120px', color: 'var(--ink)' }}>
+      {/* title */}
+      <div style={{ marginBottom: 48 }}>
+        <div style={{ fontFamily: 'Caveat', fontSize: 56, fontWeight: 700, lineHeight: 1, letterSpacing: -1 }}>
+          Safe to Spend Today
+        </div>
+        <div style={{ marginTop: 4 }}>
+          <Squiggle width={260} color="var(--accent)" h={8} />
+        </div>
+        <H size={18} color="var(--muted)" style={{ marginTop: 12, display: 'inline-block' }}>
+          A decision-support app for the gap between paychecks. One question,
+          answered in 10 seconds.
+        </H>
+        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+          <Pill>wireframes · v0.1</Pill>
+          <Pill color="var(--muted)">2 paychecks / month</Pill>
+          <Pill color="var(--accent-2)">b&w + one accent</Pill>
+        </div>
+      </div>
+
+      {/* A — product logic */}
+      <div style={sectionStyle}>
+        <SectionHead n="A" title="Product logic" />
+        <H size={17} style={{ lineHeight: 1.55 }}>
+          The app splits your money into <B>three boxes</B> so one number can answer the question.
+        </H>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginTop: 18 }}>
+          <Box title="1. Operational" accent="var(--ink)">
+            <H size={14}>Money for the current pay cycle. Spending and mandatory bills live here. Refilled by each paycheck.</H>
+          </Box>
+          <Box title="2. Reserve buffer" accent="var(--warn)" highlight="rgba(255,214,92,0.35)">
+            <H size={14}>Untouched safety net inside operational. Protects the last days of the cycle. Configurable in Settings.</H>
+          </Box>
+          <Box title="3. Savings" accent="var(--accent-2)">
+            <H size={14}>Separate box. <B>Never</B> counted in daily limit. Grows via transfers and has its own forecast + goals.</H>
+          </Box>
+        </div>
+
+        <div style={{ marginTop: 28 }}>
+          <C size={24}>The core loop</C>
+          <ol style={{ fontFamily: 'Kalam', fontSize: 15, lineHeight: 1.6, paddingLeft: 20, marginTop: 8 }}>
+            <li>At every paycheck → operational balance is topped up, cycle resets.</li>
+            <li>App subtracts upcoming mandatory bills, planned savings transfers, and the reserve.</li>
+            <li>What's left ÷ days until next paycheck = <B>Safe to spend today</B>.</li>
+            <li>Every expense you add instantly re-divides the remainder over the remaining days.</li>
+            <li>Underspend today → tomorrow's number grows. Overspend → tomorrow's number shrinks. Transparent, no guilt.</li>
+          </ol>
+        </div>
+
+        <div style={{ marginTop: 24 }}>
+          <C size={24}>Design principles</C>
+          <ul style={{ fontFamily: 'Kalam', fontSize: 15, lineHeight: 1.7, paddingLeft: 20, marginTop: 8 }}>
+            <li><B>One answer on the home screen.</B> Everything else is secondary.</li>
+            <li><B>Savings are sacred.</B> They never appear in the safe-to-spend math.</li>
+            <li><B>Forecast, don't project dreams.</B> Real purchasing power is shown next to the nominal figure.</li>
+            <li><B>Minimal charts.</B> Day-by-day bars only where they aid decision-making.</li>
+            <li><B>Calm.</B> Color used only to signal state, never for decoration.</li>
+          </ul>
+        </div>
+      </div>
+
+      {/* B — data model */}
+      <div style={sectionStyle}>
+        <SectionHead n="B" title="Data model" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <Entity name="PayCycle" fields={[
+            ['id', 'uuid'],
+            ['startDate', 'date'],
+            ['endDate', 'date  (= next paycheck date − 1)'],
+            ['openingOperationalBalance', 'money'],
+            ['expectedIncome', 'money'],
+          ]}/>
+          <Entity name="Income" fields={[
+            ['id', 'uuid'],
+            ['amount', 'money'],
+            ['expectedDate', 'date'],
+            ['receivedDate', 'date?'],
+            ['kind', "'paycheck' | 'other'"],
+          ]}/>
+          <Entity name="MandatoryPayment" fields={[
+            ['id', 'uuid'],
+            ['title', 'string'],
+            ['amount', 'money'],
+            ['dueDate', 'date'],
+            ['recurrence', "'monthly' | 'once'"],
+            ['status', "'scheduled' | 'paid' | 'missed'"],
+          ]}/>
+          <Entity name="VariableExpense" fields={[
+            ['id', 'uuid'],
+            ['amount', 'money'],
+            ['date', 'date'],
+            ['category', 'string?'],
+            ['note', 'string?'],
+          ]}/>
+          <Entity name="Reserve" fields={[
+            ['amount', 'money'],
+            ['policy', "'flat' | 'perCycle'"],
+          ]}/>
+          <Entity name="Savings" fields={[
+            ['balance', 'money'],
+            ['openedAt', 'date'],
+            ['baselineBalance', 'money'],
+          ]}/>
+          <Entity name="TransferToSavings" fields={[
+            ['id', 'uuid'],
+            ['amount', 'money'],
+            ['date', 'date'],
+            ['planned', 'bool'],
+            ['linkedGoalId', 'uuid?'],
+          ]}/>
+          <Entity name="WithdrawalFromSavings" fields={[
+            ['id', 'uuid'],
+            ['amount', 'money'],
+            ['date', 'date'],
+            ['reason', 'string?'],
+          ]}/>
+          <Entity name="SavingsGoal" fields={[
+            ['id', 'uuid'],
+            ['title', 'string'],
+            ['target', 'money'],
+            ['deadline', 'date?'],
+            ['priority', 'int'],
+          ]}/>
+          <Entity name="CalculationSettings" fields={[
+            ['payday1', 'int (day of month)'],
+            ['payday2', 'int (day of month)'],
+            ['typicalPaycheck1', 'money'],
+            ['typicalPaycheck2', 'money'],
+            ['reserveAmount', 'money'],
+            ['purchasingPowerCoef', 'number (default 0.90)'],
+            ['rounding', "'day' | 'hour'"],
+            ['includeTodayInDivisor', 'bool'],
+          ]}/>
+        </div>
+      </div>
+
+      {/* C — formulas */}
+      <div style={sectionStyle}>
+        <SectionHead n="C" title="Calculation formulas" />
+        <Formula name="availableUntilNextPaycheck">
+          {`= currentOperationalBalance
+  + sum(Income where expectedDate ≤ nextPaycheckDate and not received)
+  - sum(MandatoryPayment where dueDate ≤ nextPaycheckDate and status='scheduled')
+  - reserve
+  - sum(planned TransferToSavings where date ≤ nextPaycheckDate)`}
+        </Formula>
+
+        <Formula name="remainingDays">
+          {`= nextPaycheckDate − today        (inclusive of today)
+  min = 1                           (never divide by zero)`}
+        </Formula>
+
+        <Formula name="safeToSpendToday" highlight>
+          {`= max(0, availableUntilNextPaycheck) / remainingDays`}
+        </Formula>
+
+        <Formula name="ifISpendNothingToday_tomorrow">
+          {`= availableUntilNextPaycheck / max(1, remainingDays − 1)
+  // if remainingDays = 1 → defer to next cycle's safe amount`}
+        </Formula>
+
+        <Formula name="monthlySavingPace">
+          {`= (savings.balance − savings.baselineBalance) / monthsSinceOpened
+  // fallback: 3-month rolling average of net transfers`}
+        </Formula>
+
+        <Formula name="savingsForecastNominal(targetDate)">
+          {`= savings.balance + monthlySavingPace × monthsBetween(today, targetDate)`}
+        </Formula>
+
+        <Formula name="savingsForecastRealValue(targetDate)" highlight>
+          {`years = daysBetween(today, targetDate) / 365
+  realValue = savingsForecastNominal × purchasingPowerCoef ^ years
+  // default coef = 0.90  (≈ 10% yearly erosion)`}
+        </Formula>
+
+        <Formula name="savingsGoalGap(goal)">
+          {`= max(0, goal.target − savings.balance)
+  monthsToGoal = goalGap / monthlySavingPace     (∞ if pace = 0)
+  onTrack = goal.deadline is null
+            OR monthsToGoal ≤ monthsBetween(today, goal.deadline)`}
+        </Formula>
+      </div>
+
+      {/* D — edge cases */}
+      <div style={sectionStyle}>
+        <SectionHead n="D" title="Edge cases" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {[
+            ['Available ≤ 0', 'Show "cash-risk" state. Safe-to-spend = $0. Suggest: pause planned savings transfer, review reserve, or move mandatory payment.'],
+            ['remainingDays = 0 (payday today)', 'Show "payday-arrived" state. Hide daily figure, prompt to confirm income received → start new cycle.'],
+            ['Paycheck late / not received', 'Grace window of 48h using expectedDate. After that, mark Income as missed and recompute with lower balance.'],
+            ['Mandatory payment overdue', 'Still subtract from available. Banner on Dashboard. Does not retroactively change past safe-to-spend.'],
+            ['Expense added for a past day', 'Recompute current cycle retroactively. Today\'s safe-to-spend absorbs the drift. Show "drift" delta briefly.'],
+            ['Expense > safe-to-spend', 'Allow, but confirm with "this leaves $X for the next N days." No blocking.'],
+            ['Savings withdrawal', 'Moves into operational. Clearly labeled in History so pace calc excludes it from "saving progress".'],
+            ['New user / empty data', 'Onboarding asks for 2 paydays, typical amounts, current balance, reserve. Safe-to-spend available from first save.'],
+            ['Pay dates on weekend / short month', 'Shift to nearest prior business day; Feb handled by "last day of month" token for payday=31.'],
+            ['Reserve > operational balance', 'Available is negative → cash-risk. Reserve is never drained automatically.'],
+            ['Coefficient = 1.0', 'Real value = nominal. Acceptable. Coefficient > 1 rejected in Settings.'],
+            ['Savings pace = 0 or negative', 'Forecast shows flat or declining. Label as "no progress" rather than hiding.'],
+            ['Goal deadline in past', 'Marked "overdue". Gap still shown; suggest new deadline.'],
+            ['Timezone / DST', 'All day math uses local date, not timestamp. "Today" rolls over at local midnight.'],
+          ].map(([k, v], i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px dashed var(--thin)' }}>
+              <H size={14} weight={700} style={{ minWidth: 180 }}>{k}</H>
+              <H size={14} color="var(--muted)">{v}</H>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* E — screen architecture */}
+      <div style={sectionStyle}>
+        <SectionHead n="E" title="Screen architecture" />
+        <H size={15} color="var(--muted)" style={{ lineHeight: 1.5 }}>
+          Five tabs. Dashboard is the anchor and is opened 90% of the time. Every other
+          tab exists to explain or adjust the numbers on the Dashboard.
+        </H>
+
+        <div style={{ marginTop: 20 }}>
+          <ScreenRow n="1" name="Dashboard" priority="Opens in &lt;1s, readable in 10s">
+            Safe-to-spend (hero) · If-nothing-today · Days to payday · Upcoming bill · Quick add expense · Quick move to savings.
+          </ScreenRow>
+          <ScreenRow n="2" name="Runway / forecast" priority="Day-by-day trust">
+            Cycle timeline. Each day a row: date, daily safe amount, mandatory markers, actual so far. Warning dots when tight.
+          </ScreenRow>
+          <ScreenRow n="3" name="Savings" priority="Long-horizon confidence">
+            Saved now (hero) · Average pace · Forecast slider (date) · Real-value twin · Goals with gap and on/off-track.
+          </ScreenRow>
+          <ScreenRow n="4" name="History" priority="Audit trail">
+            Unified feed of income, expenses, transfers, withdrawals. Filter by type. Each item edits its source record.
+          </ScreenRow>
+          <ScreenRow n="5" name="Settings" priority="One-time + occasional">
+            Pay dates · typical amounts · reserve · purchasing-power coefficient · calculation preferences.
+          </ScreenRow>
+        </div>
+
+        {/* state map */}
+        <div style={{ marginTop: 36 }}>
+          <C size={24}>Dashboard states</C>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 12 }}>
+            <State name="normal" swatch="var(--ok)" desc="Available > 1 day of buffer. Business as usual."/>
+            <State name="tight" swatch="var(--warn)" desc="&lt; 3 days remaining of comfortable spend. Soft nudge."/>
+            <State name="cash-risk" swatch="var(--risk)" desc="Available ≤ 0. Safe-to-spend = $0. Action required."/>
+            <State name="payday-arrived" swatch="var(--accent-2)" desc="Income expected today. Confirm and reset cycle."/>
+            <State name="payment-due-tomorrow" swatch="var(--warn)" desc="Mandatory bill tomorrow. Pre-subtracted; banner."/>
+            <State name="savings-off-track" swatch="var(--risk)" desc="Pace too low to hit goal by deadline. Shown on Savings tab."/>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ fontFamily: 'Caveat', fontSize: 24, color: 'var(--muted)', textAlign: 'center', marginTop: 50 }}>
+        → open the <B>Wireframes</B> tab for 3 directions.
+      </div>
+    </div>
+  );
+}
+
+function SectionHead({ n, title }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 12 }}>
+      <div style={{ fontFamily: 'Caveat', fontSize: 52, fontWeight: 700, color: 'var(--accent)', lineHeight: 0.9 }}>{n}</div>
+      <div>
+        <div style={{ fontFamily: 'Caveat', fontSize: 40, fontWeight: 700, lineHeight: 1 }}>{title}</div>
+        <Squiggle width={180} color="var(--ink)" h={5} />
+      </div>
+    </div>
+  );
+}
+
+function B({ children }) {
+  return <span style={{ fontWeight: 700, backgroundImage: 'linear-gradient(transparent 70%, rgba(232,93,43,0.3) 70%)' }}>{children}</span>;
+}
+
+function Box({ title, children, accent = 'var(--ink)', highlight = null }) {
+  return (
+    <SketchBox seed={title.length} radius={14} highlight={highlight} pad={14}>
+      <H size={16} weight={700} style={{ color: accent, textTransform: 'uppercase', letterSpacing: 0.5 }}>{title}</H>
+      <div style={{ marginTop: 6 }}>{children}</div>
+    </SketchBox>
+  );
+}
+
+function Entity({ name, fields }) {
+  return (
+    <SketchBox seed={name.length + 3} radius={10} pad={12}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+        <C size={22}>{name}</C>
+        <H size={11} color="var(--muted)">entity</H>
+      </div>
+      <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.7 }}>
+        {fields.map(([k, t], i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: i < fields.length - 1 ? '1px dotted var(--thin)' : 'none', padding: '1px 0' }}>
+            <span style={{ fontWeight: 600 }}>{k}</span>
+            <span style={{ color: 'var(--muted)' }}>{t}</span>
+          </div>
+        ))}
+      </div>
+    </SketchBox>
+  );
+}
+
+function Formula({ name, children, highlight = false }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+        <C size={22} color={highlight ? 'var(--accent)' : 'var(--ink)'}>{name}</C>
+      </div>
+      <SketchBox seed={name.length + 5} radius={8} pad={14}
+                 highlight={highlight ? 'rgba(255,214,92,0.35)' : null}>
+        <pre style={{
+          margin: 0, fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap',
+          color: 'var(--ink)',
+        }}>{children}</pre>
+      </SketchBox>
+    </div>
+  );
+}
+
+function ScreenRow({ n, name, priority, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18, padding: '12px 0', borderBottom: '1px dashed var(--thin)' }}>
+      <div style={{ fontFamily: 'Caveat', fontSize: 38, fontWeight: 700, color: 'var(--accent)', width: 40, lineHeight: 0.9 }}>{n}</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <C size={26}>{name}</C>
+          <H size={13} color="var(--muted)" style={{ fontStyle: 'italic' }}>{priority}</H>
+        </div>
+        <H size={14} style={{ lineHeight: 1.5 }}>{children}</H>
+      </div>
+    </div>
+  );
+}
+
+function State({ name, swatch, desc }) {
+  return (
+    <SketchBox seed={name.length + 1} radius={10} pad={10}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{ width: 12, height: 12, borderRadius: 12, background: swatch, border: '1.5px solid var(--ink)' }} />
+        <H size={14} weight={700}>{name}</H>
+      </div>
+      <H size={13} color="var(--muted)">{desc}</H>
+    </SketchBox>
+  );
+}
+
+Object.assign(window, { SpecDoc });
+
+</script>
+<script type="text/babel">
+// Wireframe SCREENS — inside Phone frames.
+// 3 Dashboard directions: "Single Answer", "Runway Bars", "Two Envelopes"
+// 4 other screens: Runway, Savings, History, Settings
+// State variants adjust numbers/banners.
+
+// ── State-derived numbers ─────────────────────────────────────
+const STATE_DATA = {
+  'normal':            { available: 412, days: 11, safe: 37, safeTmr: 41, bill: null,  cashRisk: false },
+  'tight':             { available: 120, days: 9,  safe: 13, safeTmr: 15, bill: null,  cashRisk: false, tight: true },
+  'cash-risk':         { available: -42, days: 7,  safe: 0,  safeTmr: 0,  bill: null,  cashRisk: true },
+  'payday-arrived':    { available: 0,   days: 0,  safe: 0,  safeTmr: 0,  bill: null,  payday: true },
+  'payment-due-tomorrow': { available: 260, days: 8, safe: 32, safeTmr: 36, bill: { name: 'Internet', amount: 45, when: 'tomorrow' } },
+  'savings-off-track': { available: 412, days: 11, safe: 37, safeTmr: 41, bill: null,  offTrack: true },
+};
+function useData(state) { return STATE_DATA[state] || STATE_DATA['normal']; }
+
+// ── State banner (used on several screens) ───────────────────
+function StateBanner({ state }) {
+  const d = useData(state);
+  if (d.cashRisk) return <Banner color="var(--risk)" bg="rgba(201,63,47,0.08)" icon="!">Cash-risk · reserve protects you, but spending = $0.</Banner>;
+  if (d.payday)   return <Banner color="var(--accent-2)" bg="rgba(31,111,235,0.08)" icon="↻">Payday · confirm income to start new cycle.</Banner>;
+  if (d.tight)    return <Banner color="var(--warn)" bg="rgba(212,160,23,0.12)" icon="~">Tight week · stay under $15/day.</Banner>;
+  if (d.bill)     return <Banner color="var(--warn)" bg="rgba(212,160,23,0.10)" icon="•">{d.bill.name} ${d.bill.amount} due {d.bill.when} (already subtracted).</Banner>;
+  if (d.offTrack) return <Banner color="var(--risk)" bg="rgba(201,63,47,0.08)" icon="↓">Savings off track for year-end goal.</Banner>;
+  return null;
+}
+function Banner({ children, color, bg, icon }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      background: bg, border: `1.3px solid ${color}`, borderRadius: 10,
+      padding: '6px 10px', margin: '10px 14px',
+    }}>
+      <span style={{
+        width: 18, height: 18, borderRadius: 18, background: color, color: '#fff',
+        fontFamily: 'Caveat', fontWeight: 700, fontSize: 14, display: 'flex',
+        alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+      }}>{icon}</span>
+      <H size={12} color={color} weight={700} style={{ lineHeight: 1.2 }}>{children}</H>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// DIRECTION 1 — "Single Answer"
+// Hero number fills top half. Minimal everything else.
+// ═════════════════════════════════════════════════════════════
+function DashSingleAnswer({ state }) {
+  const d = useData(state);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '8px 14px 0', display: 'flex', justifyContent: 'space-between' }}>
+        <H size={12} color="var(--muted)">wed · apr 22</H>
+        <H size={12} color="var(--muted)">{d.payday ? 'payday!' : `${d.days} days → payday`}</H>
+      </div>
+      <StateBanner state={state} />
+
+      {/* Hero */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 14px', textAlign: 'center' }}>
+        <H size={13} color="var(--muted)" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Safe to spend today</H>
+        <div style={{ margin: '8px 0 4px' }}>
+          <BigNumber value={d.safe} size={d.cashRisk ? 82 : 96} color={d.cashRisk ? 'var(--risk)' : 'var(--ink)'} />
+        </div>
+        <Squiggle width={130} color="var(--accent)" h={7} />
+
+        <div style={{ marginTop: 18 }}>
+          <H size={13} color="var(--muted)">if I spend nothing today, tomorrow</H>
+          <div style={{ marginTop: 2 }}>
+            <BigNumber value={d.safeTmr} size={36} color="var(--ink-2)" />
+          </div>
+        </div>
+      </div>
+
+      {/* quick actions */}
+      <div style={{ padding: '0 14px 10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <SketchBox seed={1} pad={10} radius={14}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <span style={{ fontFamily: 'Caveat', fontSize: 24, fontWeight: 700 }}>−</span>
+            <H size={14} weight={700}>Add expense</H>
+          </div>
+        </SketchBox>
+        <SketchBox seed={2} pad={10} radius={14}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <span style={{ fontFamily: 'Caveat', fontSize: 24, fontWeight: 700, color: 'var(--accent-2)' }}>→</span>
+            <H size={14} weight={700} color="var(--accent-2)">To savings</H>
+          </div>
+        </SketchBox>
+      </div>
+
+      {/* small strip: next bill + balance */}
+      <div style={{ padding: '0 14px 10px', display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+        <MiniStat label="operational" value="$812" />
+        <MiniStat label="next bill" value="Internet · Apr 23" />
+        <MiniStat label="savings" value="$4,310" />
+      </div>
+
+      <TabBar active={0} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// DIRECTION 2 — "Runway Bars"
+// Hero + day-by-day bars visible on home, quick visual trust.
+// ═════════════════════════════════════════════════════════════
+function DashRunwayBars({ state }) {
+  const d = useData(state);
+  // Generate 11 days; taller = higher safe spend
+  const days = Array.from({ length: Math.max(d.days, 6) }, (_, i) => {
+    const base = d.safe || 30;
+    const dip = i === 2 ? 0.4 : (i === 6 ? 0.55 : 1);
+    return { h: base * (0.8 + Math.sin(i * 1.4) * 0.15) * dip, mandatory: i === 2 || i === 6 };
+  });
+  const maxH = Math.max(...days.map(x => x.h), 1);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '8px 14px 0', display: 'flex', justifyContent: 'space-between' }}>
+        <H size={12} color="var(--muted)">wed · apr 22</H>
+        <H size={12} color="var(--muted)">{d.days} days → payday</H>
+      </div>
+      <StateBanner state={state} />
+
+      {/* hero */}
+      <div style={{ textAlign: 'center', padding: '10px 14px 0' }}>
+        <H size={12} color="var(--muted)" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Safe today</H>
+        <div><BigNumber value={d.safe} size={64} color={d.cashRisk ? 'var(--risk)' : 'var(--ink)'} /></div>
+        <H size={12} color="var(--muted)">(tomorrow if $0 today → <B>${d.safeTmr}</B>)</H>
+      </div>
+
+      {/* runway bars */}
+      <div style={{ margin: '14px 14px 0', position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 92, borderBottom: '1.5px solid var(--ink)' }}>
+          {days.slice(0, 11).map((day, i) => (
+            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+              {day.mandatory && <span style={{ fontFamily: 'Caveat', fontSize: 10, color: 'var(--warn)' }}>•</span>}
+              <div style={{
+                width: '100%',
+                height: `${(day.h / maxH) * 70}px`,
+                background: i === 0 ? 'var(--ink)' : 'repeating-linear-gradient(135deg, var(--ink) 0 1px, transparent 1px 4px)',
+                border: '1.2px solid var(--ink)',
+                borderRadius: '2px 2px 0 0',
+              }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+          {days.slice(0, 11).map((_, i) => (
+            <div key={i} style={{ flex: 1, textAlign: 'center', fontFamily: 'Kalam', fontSize: 9, color: i === 0 ? 'var(--ink)' : 'var(--muted)', fontWeight: i === 0 ? 700 : 400 }}>
+              {i === 0 ? 'TODAY' : 22 + i}
+            </div>
+          ))}
+        </div>
+        <H size={10} color="var(--muted)" style={{ display: 'block', marginTop: 6, textAlign: 'center' }}>
+          solid = today · dashed = projected · • = mandatory bill
+        </H>
+      </div>
+
+      {/* bill + quick add */}
+      <div style={{ padding: '10px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'flex-end' }}>
+        <SketchBox seed={3} pad={8} radius={10}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <H size={11} color="var(--muted)">Next bill</H>
+              <div><H size={14} weight={700}>Internet · Apr 23</H></div>
+            </div>
+            <C size={22}>$45</C>
+          </div>
+        </SketchBox>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <SketchBox seed={4} pad={8} radius={14}>
+            <div style={{ textAlign: 'center' }}><H size={13} weight={700}>− add expense</H></div>
+          </SketchBox>
+          <SketchBox seed={5} pad={8} radius={14}>
+            <div style={{ textAlign: 'center' }}><H size={13} weight={700} color="var(--accent-2)">→ to savings</H></div>
+          </SketchBox>
+        </div>
+      </div>
+
+      <TabBar active={0} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// DIRECTION 3 — "Two Envelopes"
+// Physical metaphor: two boxes. Operational (with daily answer) vs Savings.
+// Visually communicates the separation the user insisted on.
+// ═════════════════════════════════════════════════════════════
+function DashTwoEnvelopes({ state }) {
+  const d = useData(state);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '8px 14px 0', display: 'flex', justifyContent: 'space-between' }}>
+        <H size={12} color="var(--muted)">wed · apr 22</H>
+        <H size={12} color="var(--muted)">{d.days} days → payday</H>
+      </div>
+      <StateBanner state={state} />
+
+      {/* Operational envelope — big */}
+      <div style={{ padding: '6px 14px 6px' }}>
+        <SketchBox seed={6} pad={14} radius={16} highlight="rgba(255,214,92,0.2)">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <H size={11} color="var(--muted)" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Operational</H>
+            <H size={12} color="var(--muted)">$812 left</H>
+          </div>
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <H size={11} color="var(--muted)">safe today</H>
+            <BigNumber value={d.safe} size={72} color={d.cashRisk ? 'var(--risk)' : 'var(--ink)'} />
+            <H size={12} color="var(--muted)">or ${d.safeTmr} tomorrow if nothing today</H>
+          </div>
+          {/* mini segmented bar: spent / safe / reserve */}
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', height: 10, border: '1.3px solid var(--ink)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ flex: 3, background: 'var(--ink)' }} title="spent" />
+              <div style={{ flex: 5, background: 'repeating-linear-gradient(135deg, var(--ink) 0 1px, transparent 1px 4px)' }} title="remaining safe" />
+              <div style={{ flex: 2, background: 'var(--warn)' }} title="reserve" />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontFamily: 'Kalam', fontSize: 10, color: 'var(--muted)' }}>
+              <span>spent</span><span>safe remaining</span><span>reserve</span>
+            </div>
+          </div>
+        </SketchBox>
+      </div>
+
+      {/* Savings envelope — smaller */}
+      <div style={{ padding: '0 14px' }}>
+        <SketchBox seed={7} pad={12} radius={16}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <H size={11} color="var(--accent-2)" weight={700} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Savings — sealed</H>
+              <div><BigNumber value="4,310" size={38} color="var(--accent-2)" /></div>
+              <H size={11} color="var(--muted)">+$180/mo avg · year-end forecast $5,340</H>
+            </div>
+            <SketchBox seed={8} pad={6} radius={40} stroke="var(--accent-2)">
+              <H size={11} weight={700} color="var(--accent-2)">→ add</H>
+            </SketchBox>
+          </div>
+        </SketchBox>
+      </div>
+
+      {/* quick add */}
+      <div style={{ padding: '10px 14px 6px', flex: 1, display: 'flex', alignItems: 'flex-end' }}>
+        <SketchBox seed={9} pad={14} radius={22} fill="var(--ink)">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <span style={{ fontFamily: 'Caveat', fontSize: 28, fontWeight: 700, color: '#fff' }}>+</span>
+            <H size={15} weight={700} style={{ color: '#fff' }}>log expense</H>
+          </div>
+        </SketchBox>
+      </div>
+
+      <TabBar active={0} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// SCREEN 2 — Runway / Forecast
+// Day-by-day list.
+// ═════════════════════════════════════════════════════════════
+function ScreenRunway() {
+  const days = [];
+  const today = 22;
+  for (let i = 0; i < 11; i++) {
+    const date = today + i;
+    const tight = (i === 2 || i === 6);
+    const safe = 37 + Math.round(Math.sin(i * 1.3) * 5) - (tight ? 15 : 0);
+    days.push({ date, safe, mandatory: i === 2 ? 'Internet $45' : (i === 6 ? 'Gym $29' : null), isToday: i === 0 });
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 14px 0' }}>
+        <C size={28}>Runway</C>
+        <H size={12} color="var(--muted)">apr 22 → may 2 · 11 days</H>
+      </div>
+
+      {/* summary strip */}
+      <div style={{ padding: '8px 14px 0', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+        <MiniStat label="avail." value="$412" />
+        <MiniStat label="bills left" value="$74" />
+        <MiniStat label="reserve" value="$100" />
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {days.map((d, i) => (
+          <div key={i} style={{
+            display: 'grid', gridTemplateColumns: '42px 1fr 70px', alignItems: 'center', gap: 8,
+            padding: '5px 8px', borderRadius: 8,
+            background: d.isToday ? 'rgba(232,93,43,0.15)' : 'transparent',
+            border: d.isToday ? '1.5px solid var(--accent)' : '1px dashed var(--thin)',
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <H size={9} color="var(--muted)">apr</H>
+              <div><C size={20}>{d.date}</C></div>
+            </div>
+            <div>
+              <H size={12} weight={d.isToday ? 700 : 400}>
+                {d.isToday ? 'TODAY · safe to spend' : 'if on pace'}
+              </H>
+              {d.mandatory && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 6, background: 'var(--warn)' }} />
+                  <H size={11} color="var(--warn)">{d.mandatory}</H>
+                </div>
+              )}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <BigNumber value={d.safe} size={22} color={d.safe < 15 ? 'var(--risk)' : 'var(--ink)'} />
+            </div>
+          </div>
+        ))}
+        <div style={{ textAlign: 'center', padding: 8, borderTop: '1px dashed var(--thin)', marginTop: 4 }}>
+          <H size={13} weight={700}>May 3 · payday → +$1,400</H>
+        </div>
+      </div>
+
+      <TabBar active={1} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// SCREEN 3 — Savings
+// ═════════════════════════════════════════════════════════════
+function ScreenSavings({ state }) {
+  const offTrack = state === 'savings-off-track';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 14px 0' }}>
+        <C size={28}>Savings</C>
+      </div>
+
+      {offTrack && <StateBanner state={state} />}
+
+      {/* Hero saved now */}
+      <div style={{ padding: '8px 14px' }}>
+        <H size={11} color="var(--muted)" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Saved now</H>
+        <BigNumber value="4,310" size={60} color="var(--accent-2)" />
+        <H size={12} color="var(--muted)" style={{ display: 'block', marginTop: 2 }}>
+          pace <B>$180/mo</B> · since jan 2026
+        </H>
+      </div>
+
+      {/* forecast */}
+      <div style={{ padding: '0 14px 8px' }}>
+        <SketchBox seed={10} pad={12} radius={14}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <H size={12} color="var(--muted)">Forecast by</H>
+            <C size={20}>Dec 31, 2026</C>
+          </div>
+          {/* date slider */}
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ flex: 1, height: 2, background: 'var(--ink)', position: 'relative' }}>
+              <div style={{ position: 'absolute', left: '60%', top: -7, width: 16, height: 16, borderRadius: 16, background: 'var(--ink)', border: '2px solid var(--paper)' }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
+            <div>
+              <H size={10} color="var(--muted)">nominal</H>
+              <BigNumber value="5,830" size={32} color="var(--ink)" />
+            </div>
+            <div style={{ width: 1, background: 'var(--thin)' }} />
+            <div style={{ textAlign: 'right' }}>
+              <H size={10} color="var(--muted)">today's money (0.90×)</H>
+              <BigNumber value="5,378" size={32} color={offTrack ? 'var(--muted)' : 'var(--ink-2)'} />
+            </div>
+          </div>
+        </SketchBox>
+      </div>
+
+      {/* Goals */}
+      <div style={{ padding: '0 14px', flex: 1, overflow: 'auto' }}>
+        <H size={11} color="var(--muted)" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Goals</H>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          <Goal title="Emergency fund" cur={4310} target={6000} deadline="aug" ontrack={!offTrack} />
+          <Goal title="Summer trip" cur={420} target={1200} deadline="jun" ontrack={false} />
+          <Goal title="New laptop" cur={0} target={1800} deadline="dec" ontrack={true} />
+        </div>
+      </div>
+
+      <TabBar active={2} />
+    </div>
+  );
+}
+function Goal({ title, cur, target, deadline, ontrack }) {
+  const pct = Math.min(1, cur / target);
+  return (
+    <SketchBox seed={title.length} pad={10} radius={12}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <H size={13} weight={700}>{title}</H>
+        <H size={10} color={ontrack ? 'var(--ok)' : 'var(--risk)'} weight={700}>
+          {ontrack ? '✓ on track' : '✕ behind'}
+        </H>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+        <H size={11} color="var(--muted)">${cur} / ${target}</H>
+        <H size={11} color="var(--muted)">by {deadline}</H>
+      </div>
+      <div style={{ marginTop: 6, height: 8, background: 'var(--paper-2)', border: '1.2px solid var(--ink)', borderRadius: 2, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ width: `${pct * 100}%`, height: '100%', background: ontrack ? 'var(--ink)' : 'repeating-linear-gradient(135deg, var(--risk) 0 2px, transparent 2px 5px)' }} />
+      </div>
+    </SketchBox>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// SCREEN 4 — History
+// ═════════════════════════════════════════════════════════════
+function ScreenHistory() {
+  const items = [
+    { d: 'apr 22', t: 'Coffee', amt: -4.50, kind: 'exp' },
+    { d: 'apr 22', t: 'Lunch', amt: -12.30, kind: 'exp' },
+    { d: 'apr 21', t: 'To Savings', amt: -100, kind: 'xfer' },
+    { d: 'apr 21', t: 'Groceries', amt: -42.11, kind: 'exp' },
+    { d: 'apr 20', t: 'Paycheck', amt: 1400, kind: 'inc' },
+    { d: 'apr 20', t: 'Rent', amt: -780, kind: 'bill' },
+    { d: 'apr 19', t: 'Gas', amt: -38, kind: 'exp' },
+    { d: 'apr 18', t: 'Refund · shirt', amt: 24, kind: 'inc' },
+    { d: 'apr 17', t: 'Dinner out', amt: -28, kind: 'exp' },
+  ];
+  const mark = { exp: '−', inc: '+', xfer: '→', bill: '!' };
+  const col = { exp: 'var(--ink)', inc: 'var(--ok)', xfer: 'var(--accent-2)', bill: 'var(--warn)' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 14px 0' }}>
+        <C size={28}>History</C>
+      </div>
+      {/* filter chips */}
+      <div style={{ display: 'flex', gap: 6, padding: '8px 14px', overflowX: 'auto' }}>
+        {['all', 'expenses', 'income', 'transfers', 'bills'].map((c, i) => (
+          <div key={c} style={{
+            fontFamily: 'Kalam', fontSize: 11, padding: '3px 10px', borderRadius: 20,
+            border: '1.3px solid var(--ink)', background: i === 0 ? 'var(--ink)' : 'transparent',
+            color: i === 0 ? 'var(--paper)' : 'var(--ink)', fontWeight: 700, whiteSpace: 'nowrap',
+          }}>{c}</div>
+        ))}
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '0 14px 10px' }}>
+        {items.map((x, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 0', borderBottom: '1px dashed var(--thin)',
+          }}>
+            <div style={{
+              width: 24, height: 24, borderRadius: 24, background: col[x.kind], color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'Caveat', fontSize: 16, fontWeight: 700,
+            }}>{mark[x.kind]}</div>
+            <div style={{ flex: 1 }}>
+              <H size={13} weight={700}>{x.t}</H>
+              <H size={10} color="var(--muted)">{x.d}</H>
+            </div>
+            <C size={22} color={x.amt > 0 ? 'var(--ok)' : 'var(--ink)'}>
+              {x.amt > 0 ? '+' : '−'}${Math.abs(x.amt).toFixed(x.amt % 1 === 0 ? 0 : 2)}
+            </C>
+          </div>
+        ))}
+      </div>
+      <TabBar active={3} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// SCREEN 5 — Settings
+// ═════════════════════════════════════════════════════════════
+function ScreenSettings() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 14px 0' }}>
+        <C size={28}>Settings</C>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 14px' }}>
+        <SettingGroup title="Pay cycle">
+          <SettingRow label="1st payday" value="5th of month" />
+          <SettingRow label="2nd payday" value="20th of month" />
+          <SettingRow label="Typical amount #1" value="$1,400" />
+          <SettingRow label="Typical amount #2" value="$1,400" />
+        </SettingGroup>
+        <SettingGroup title="Money">
+          <SettingRow label="Reserve buffer" value="$100" />
+          <SettingRow label="Purchasing power coef." value="0.90 / year" sub="(default · ~10% yearly erosion)" />
+        </SettingGroup>
+        <SettingGroup title="Calculation">
+          <SettingRow label="Include today in divisor" toggle={true} />
+          <SettingRow label="Round safe-to-spend" value="to $1" />
+          <SettingRow label="Auto-subtract planned savings" toggle={true} />
+        </SettingGroup>
+        <SettingGroup title="Data">
+          <SettingRow label="Export CSV" link />
+          <SettingRow label="Reset cycle manually" link />
+        </SettingGroup>
+      </div>
+      <TabBar active={4} />
+    </div>
+  );
+}
+function SettingGroup({ title, children }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <H size={10} color="var(--muted)" weight={700} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{title}</H>
+      <SketchBox seed={title.length} pad={0} radius={12} style={{ marginTop: 4 }}>
+        <div>{children}</div>
+      </SketchBox>
+    </div>
+  );
+}
+function SettingRow({ label, value, sub, toggle, link }) {
+  const [on, setOn] = React.useState(true);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderBottom: '1px dashed var(--thin)' }}>
+      <div>
+        <H size={13}>{label}</H>
+        {sub && <div><H size={10} color="var(--muted)">{sub}</H></div>}
+      </div>
+      {toggle != null ? (
+        <div onClick={() => setOn(!on)} style={{
+          width: 32, height: 18, borderRadius: 20, border: '1.3px solid var(--ink)',
+          background: on ? 'var(--ink)' : 'transparent', position: 'relative', cursor: 'pointer',
+        }}>
+          <div style={{
+            position: 'absolute', top: 1, left: on ? 15 : 1, width: 14, height: 14, borderRadius: 14,
+            background: on ? 'var(--paper)' : 'var(--ink)', transition: 'left .15s',
+          }} />
+        </div>
+      ) : link ? (
+        <H size={12} color="var(--accent-2)" weight={700}>›</H>
+      ) : (
+        <H size={13} color="var(--muted)">{value}</H>
+      )}
+    </div>
+  );
+}
+
+// shared mini stat
+function MiniStat({ label, value }) {
+  return (
+    <SketchBox seed={label.length} pad={8} radius={8}>
+      <H size={10} color="var(--muted)" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</H>
+      <div><H size={13} weight={700}>{value}</H></div>
+    </SketchBox>
+  );
+}
+
+Object.assign(window, {
+  DashSingleAnswer, DashRunwayBars, DashTwoEnvelopes,
+  ScreenRunway, ScreenSavings, ScreenHistory, ScreenSettings,
+  StateBanner,
+});
+
+</script>
+<script type="text/babel">
+// App shell: top tabs (Spec / Wireframes), Wireframes has 3 Dashboard dirs + 4 other screens.
+// Tweaks panel: state variant.
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "state": "normal",
+  "focus": "all"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tab, setTab] = React.useState('wires'); // 'spec' | 'wires'
+  const [tweaksOpen, setTweaksOpen] = React.useState(false);
+  const [state, setState] = React.useState(TWEAK_DEFAULTS.state);
+  const [focus, setFocus] = React.useState(TWEAK_DEFAULTS.focus);
+
+  // Edit-mode protocol
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksOpen(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksOpen(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+  const setKey = (k, v) => {
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [k]: v } }, '*');
+  };
+
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      {/* header */}
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 10, background: 'rgba(251,250,246,0.92)',
+        backdropFilter: 'blur(8px)',
+        borderBottom: '1.5px solid var(--ink)',
+        padding: '12px 28px', display: 'flex', alignItems: 'center', gap: 20,
+      }}>
+        <div>
+          <div style={{ fontFamily: 'Caveat', fontSize: 32, fontWeight: 700, lineHeight: 0.9 }}>
+            Safe to Spend
+          </div>
+          <H size={11} color="var(--muted)">wireframes · product spec</H>
+        </div>
+        <div style={{ flex: 1 }} />
+        <TopTabs tab={tab} setTab={setTab} />
+      </header>
+
+      {tab === 'spec' ? <SpecDoc /> : <Wires state={state} focus={focus} />}
+
+      {tweaksOpen && (
+        <TweaksPanel
+          state={state}
+          setState={(v) => { setState(v); setKey('state', v); }}
+          focus={focus}
+          setFocus={(v) => { setFocus(v); setKey('focus', v); }}
+          onClose={() => setTweaksOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TopTabs({ tab, setTab }) {
+  const btn = (id, label) => (
+    <div onClick={() => setTab(id)} style={{
+      fontFamily: 'Caveat', fontSize: 22, fontWeight: 700,
+      padding: '4px 16px', borderRadius: 20, cursor: 'pointer',
+      background: tab === id ? 'var(--ink)' : 'transparent',
+      color: tab === id ? 'var(--paper)' : 'var(--ink)',
+      border: '1.5px solid var(--ink)',
+    }}>{label}</div>
+  );
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {btn('spec', 'A–E  Spec')}
+      {btn('wires', 'F  Wireframes')}
+    </div>
+  );
+}
+
+// ─── Wires grid ─────────────────────────────────────────────
+function Wires({ state, focus }) {
+  const stateLabel = state.replace(/-/g, ' ');
+
+  const showDash = focus === 'all' || focus === 'dash';
+  const showOther = focus === 'all' || focus === 'other';
+
+  return (
+    <div style={{ padding: '36px 48px 120px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* intro */}
+      <div style={{ marginBottom: 28 }}>
+        <C size={38}>F. Wireframes</C>
+        <Squiggle width={180} color="var(--accent)" h={6} />
+        <H size={14} color="var(--muted)" style={{ display: 'block', marginTop: 6, maxWidth: 720, lineHeight: 1.5 }}>
+          Three distinct directions for the Dashboard — each answers the same question
+          with different visual emphasis. Flip between six states using the Tweaks
+          toggle (top toolbar) to stress-test edge cases.
+        </H>
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Pill>state: {stateLabel}</Pill>
+          <Pill color="var(--accent)">tip: turn on Tweaks →</Pill>
+        </div>
+      </div>
+
+      {showDash && (
+        <section style={{ marginBottom: 50 }}>
+          <SectionTitle n="F.1" title="Dashboard — three directions" />
+          <div style={{ display: 'flex', gap: 36, justifyContent: 'center', flexWrap: 'wrap', marginTop: 24 }}>
+            <DirectionCard
+              label="A. Single Answer"
+              tagline="Hero number, nothing else. Max calm."
+              pros={['least noise', 'fast scanning', 'beginner-friendly']}
+              cons={['no visual context for the cycle']}
+            >
+              <Phone label="A · Single Answer" seed={11}>
+                <DashSingleAnswer state={state} />
+              </Phone>
+            </DirectionCard>
+            <DirectionCard
+              label="B. Runway Bars"
+              tagline="Hero + 11-day bar runway, trust at a glance."
+              pros={['see the whole cycle', 'mandatory markers visible', 'spot tight days']}
+              cons={['denser', 'learn curve']}
+            >
+              <Phone label="B · Runway Bars" seed={12}>
+                <DashRunwayBars state={state} />
+              </Phone>
+            </DirectionCard>
+            <DirectionCard
+              label="C. Two Envelopes"
+              tagline="Physical metaphor — separation made visible."
+              pros={['savings feel sealed', 'reserve split is obvious', 'tactile']}
+              cons={['more real estate per element']}
+            >
+              <Phone label="C · Two Envelopes" seed={13}>
+                <DashTwoEnvelopes state={state} />
+              </Phone>
+            </DirectionCard>
+          </div>
+        </section>
+      )}
+
+      {showOther && (
+        <section>
+          <SectionTitle n="F.2" title="The other four screens" />
+          <div style={{ display: 'flex', gap: 36, justifyContent: 'center', flexWrap: 'wrap', marginTop: 24 }}>
+            <Phone label="2 · Runway" seed={14}>
+              <ScreenRunway />
+            </Phone>
+            <Phone label="3 · Savings" seed={15} state={state === 'savings-off-track' ? 'off-track' : null}>
+              <ScreenSavings state={state} />
+            </Phone>
+            <Phone label="4 · History" seed={16}>
+              <ScreenHistory />
+            </Phone>
+            <Phone label="5 · Settings" seed={17}>
+              <ScreenSettings />
+            </Phone>
+          </div>
+        </section>
+      )}
+
+      <div style={{ marginTop: 60, padding: 20, borderTop: '1px dashed var(--thin)', maxWidth: 820, margin: '60px auto 0' }}>
+        <C size={24}>Next steps</C>
+        <ul style={{ fontFamily: 'Kalam', fontSize: 14, lineHeight: 1.65, paddingLeft: 18, color: 'var(--ink-2)' }}>
+          <li>Pick a Dashboard direction (A, B, or C) — or propose a hybrid.</li>
+          <li>Confirm whether the reserve should be user-named (e.g. "safety cushion") or stay as "reserve".</li>
+          <li>Decide if the "if I spend nothing today" number stays on the hero or becomes a tap-to-reveal.</li>
+          <li>Lock onboarding: paydays, reserve, typical amounts, savings baseline.</li>
+          <li>Once chosen, move to hi-fi prototype with real typography and color.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ n, title }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+      <div style={{ fontFamily: 'Caveat', fontSize: 36, fontWeight: 700, color: 'var(--accent)', lineHeight: 0.9 }}>{n}</div>
+      <div>
+        <C size={30}>{title}</C>
+        <Squiggle width={140} color="var(--ink)" h={4} />
+      </div>
+    </div>
+  );
+}
+
+function DirectionCard({ label, tagline, pros = [], cons = [], children }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, maxWidth: 320 }}>
+      {children}
+      <div style={{ textAlign: 'center', marginTop: 6 }}>
+        <H size={13} color="var(--muted)" style={{ fontStyle: 'italic' }}>{tagline}</H>
+      </div>
+      <div style={{ display: 'flex', gap: 10, fontFamily: 'Kalam', fontSize: 12 }}>
+        <div>
+          <H size={11} color="var(--ok)" weight={700}>+ pros</H>
+          <ul style={{ margin: 0, paddingLeft: 14 }}>
+            {pros.map((p, i) => <li key={i}><H size={11} color="var(--ink-2)">{p}</H></li>)}
+          </ul>
+        </div>
+        <div>
+          <H size={11} color="var(--risk)" weight={700}>− cons</H>
+          <ul style={{ margin: 0, paddingLeft: 14 }}>
+            {cons.map((p, i) => <li key={i}><H size={11} color="var(--ink-2)">{p}</H></li>)}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tweaks panel ───────────────────────────────────────────
+function TweaksPanel({ state, setState, focus, setFocus, onClose }) {
+  const states = ['normal', 'tight', 'cash-risk', 'payday-arrived', 'payment-due-tomorrow', 'savings-off-track'];
+  const focuses = [['all', 'all screens'], ['dash', 'dashboards only'], ['other', 'other screens']];
+
+  return (
+    <div style={{
+      position: 'fixed', right: 20, bottom: 20, zIndex: 100,
+      width: 260, background: '#fff', border: '1.5px solid var(--ink)', borderRadius: 14,
+      padding: 14, boxShadow: '4px 6px 0 var(--ink), 0 20px 40px rgba(0,0,0,0.12)',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <C size={22}>Tweaks</C>
+        <div onClick={onClose} style={{ cursor: 'pointer', fontFamily: 'Caveat', fontSize: 20, color: 'var(--muted)' }}>×</div>
+      </div>
+
+      <H size={10} color="var(--muted)" weight={700} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>State</H>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6, marginBottom: 12 }}>
+        {states.map((s) => (
+          <div key={s} onClick={() => setState(s)} style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderRadius: 6, cursor: 'pointer',
+            background: state === s ? 'rgba(232,93,43,0.15)' : 'transparent',
+            border: state === s ? '1.3px solid var(--accent)' : '1.3px solid transparent',
+          }}>
+            <Check on={state === s} />
+            <H size={12}>{s.replace(/-/g, ' ')}</H>
+          </div>
+        ))}
+      </div>
+
+      <H size={10} color="var(--muted)" weight={700} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Focus</H>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+        {focuses.map(([k, label]) => (
+          <div key={k} onClick={() => setFocus(k)} style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderRadius: 6, cursor: 'pointer',
+            background: focus === k ? 'rgba(31,111,235,0.10)' : 'transparent',
+            border: focus === k ? '1.3px solid var(--accent-2)' : '1.3px solid transparent',
+          }}>
+            <Check on={focus === k} />
+            <H size={12}>{label}</H>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// mount
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+</script>
+
+
+</body>
+</html>

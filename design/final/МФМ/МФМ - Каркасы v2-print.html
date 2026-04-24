@@ -1,0 +1,1314 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>МФМ · Каркасы</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@400;700&family=JetBrains+Mono:wght@400;600;700&family=Archivo+Black&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink: #141414;
+    --ink-2: #2a2a2a;
+    --muted: #6b6b6b;
+    --thin: #c9c6bc;
+    --paper: #f4f1e8;      /* warm off-white */
+    --paper-2: #e9e5d6;
+    --red:  #d63031;
+    --blue: #0749a9;
+    --yellow: #fbdd5b;
+    --yellow-dim: #f3d34a;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--paper); color:var(--ink);
+    font-family:'Kalam', system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image:
+      radial-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+      radial-gradient(rgba(0,0,0,0.02) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    mix-blend-mode: multiply;
+    opacity:.55;
+  }
+  #root{ position:relative; z-index:1; }
+
+  .slab{ font-family:'Archivo Black', system-ui; font-weight:900; letter-spacing:-0.02em; }
+  .mono{ font-family:'JetBrains Mono', monospace; }
+  .hand{ font-family:'Caveat', cursive; font-weight:700; }
+  .ui{ font-family:'Kalam', sans-serif; }
+
+  @page { size: A3 portrait; margin: 1.2cm; }
+  @media print {
+    html, body { background: var(--paper) !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+    body::before { display:none !important; }
+    .print-header-sticky { position: static !important; }
+    .no-print { display: none !important; }
+    .print-break { break-before: page; page-break-before: always; }
+    .print-avoid { break-inside: avoid; page-break-inside: avoid; }
+    * { box-shadow: none !important; }
+  }
+
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail" data-bg-color="#f4f1e8">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect x="120" y="120" width="480" height="560" fill="none" stroke="#141414" stroke-width="10"/>
+    <rect x="160" y="160" width="160" height="160" fill="#fbdd5b" stroke="#141414" stroke-width="8"/>
+    <text x="360" y="290" font-family="'Archivo Black', sans-serif" font-size="110" font-weight="900" fill="#141414">8 400</text>
+    <text x="360" y="340" font-family="monospace" font-size="28" fill="#6b6b6b">₽ · сегодня</text>
+    <circle cx="240" cy="500" r="50" fill="#0749a9"/>
+    <rect x="340" y="460" width="220" height="80" fill="none" stroke="#141414" stroke-width="6"/>
+    <rect x="640" y="120" width="440" height="560" fill="none" stroke="#141414" stroke-width="10"/>
+    <g stroke="#141414" stroke-width="4" fill="none">
+      <rect x="680" y="180" width="80" height="80"/>
+      <rect x="780" y="180" width="80" height="80" fill="#fbdd5b"/>
+      <rect x="880" y="180" width="80" height="80"/>
+      <rect x="980" y="180" width="80" height="80"/>
+      <rect x="680" y="280" width="80" height="80"/>
+      <rect x="780" y="280" width="80" height="80"/>
+      <rect x="880" y="280" width="80" height="80" fill="#d63031"/>
+      <rect x="980" y="280" width="80" height="80"/>
+    </g>
+    <text x="680" y="450" font-family="'Archivo Black', sans-serif" font-size="42" font-weight="900" fill="#141414">МФМ</text>
+    <text x="680" y="490" font-family="monospace" font-size="22" fill="#6b6b6b">каркасы · v2</text>
+  </svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+// ═════════════════════════════════════════════════════════════
+// ── PRIMITIVES ───────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+
+function roughRectPath(x, y, w, h, seed = 1, jitter = 1.0) {
+  const rand = (n) => { const s = Math.sin(seed * 9301 + n * 49297) * 233280; return (s - Math.floor(s)) * 2 - 1; };
+  const j = (n) => rand(n) * jitter;
+  const x1 = x + j(1), y1 = y + j(2);
+  const x2 = x + w + j(3), y2 = y + j(4);
+  const x3 = x + w + j(5), y3 = y + h + j(6);
+  const x4 = x + j(7), y4 = y + h + j(8);
+  const cp = (a, b, c, d, n) => 'Q ' + ((a + c) / 2 + j(n) * 1.2) + ' ' + ((b + d) / 2 + j(n + 1) * 1.2) + ' ' + c + ' ' + d;
+  return `M ${x1} ${y1} ${cp(x1, y1, x2, y2, 10)} ${cp(x2, y2, x3, y3, 12)} ${cp(x3, y3, x4, y4, 14)} ${cp(x4, y4, x1, y1, 16)} Z`;
+}
+
+function SketchBox({ children, style = {}, fill = 'transparent', stroke = 'var(--ink)', strokeW = 1.8, seed = 1, dashed = false, highlight = null, pad = 14, double = true }) {
+  const ref = React.useRef(null);
+  const [dims, setDims] = React.useState({ w: 0, h: 0 });
+  React.useLayoutEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver(() => {
+      const r = ref.current.getBoundingClientRect();
+      setDims({ w: r.width, h: r.height });
+    });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  const { w, h } = dims;
+  return (
+    <div ref={ref} style={{ position: 'relative', padding: pad, ...style }}>
+      {w > 0 && (
+        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
+          {highlight && <path d={roughRectPath(3, 3, w - 6, h - 6, seed + 30, 1.2)} fill={highlight} opacity="0.65" />}
+          <path d={roughRectPath(2, 2, w - 4, h - 4, seed, 0.9)} fill={fill} stroke={stroke} strokeWidth={strokeW} strokeDasharray={dashed ? '5 4' : 'none'} strokeLinejoin="round" />
+          {double && <path d={roughRectPath(2.8, 2.8, w - 5.6, h - 5.6, seed + 11, 0.7)} fill="none" stroke={stroke} strokeWidth={strokeW * 0.55} opacity="0.5" strokeLinejoin="round" />}
+        </svg>
+      )}
+      <div style={{ position: 'relative', zIndex: 1 }}>{children}</div>
+    </div>
+  );
+}
+
+// Bauhaus geometric glyphs — square, circle, triangle used as icons/markers.
+function Glyph({ shape, fill = 'var(--ink)', stroke = null, size = 16 }) {
+  const s = size;
+  const strokeProps = stroke ? { fill: 'none', stroke, strokeWidth: 1.8 } : { fill };
+  if (shape === 'square') return <svg width={s} height={s}><rect x="1" y="1" width={s-2} height={s-2} {...strokeProps} /></svg>;
+  if (shape === 'circle') return <svg width={s} height={s}><circle cx={s/2} cy={s/2} r={s/2 - 1} {...strokeProps} /></svg>;
+  if (shape === 'triangle') return <svg width={s} height={s}><polygon points={`${s/2},1 ${s-1},${s-1} 1,${s-1}`} {...strokeProps} /></svg>;
+  if (shape === 'bar') return <svg width={s} height={s/3}><rect x="0" y="0" width={s} height={s/3} fill={fill} /></svg>;
+  if (shape === 'halfcircle') return <svg width={s} height={s/2}><path d={`M 1 ${s/2} A ${s/2-1} ${s/2-1} 0 0 1 ${s-1} ${s/2}`} {...strokeProps} /></svg>;
+  return null;
+}
+
+// Squiggle underline (retained for sketch texture)
+function Squiggle({ width = 80, color = 'var(--ink)', h = 5 }) {
+  const pts = 14, amp = h / 2.2;
+  let d = `M 0 ${h / 2}`;
+  for (let i = 1; i <= pts; i++) {
+    const x = (i / pts) * width;
+    const y = h / 2 + Math.sin(i * 1.3) * amp;
+    d += ` L ${x} ${y}`;
+  }
+  return <svg width={width} height={h} style={{ display: 'block' }}><path d={d} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" /></svg>;
+}
+
+// Bauhaus solid rule — thick horizontal line with optional color accent
+function Rule({ color = 'var(--ink)', thick = 3, style = {} }) {
+  return <div style={{ height: thick, background: color, ...style }} />;
+}
+
+function H({ children, size = 14, color = 'var(--ink)', weight = 400, style = {} }) {
+  return <span style={{ fontFamily: 'Kalam, sans-serif', fontSize: size, color, fontWeight: weight, lineHeight: 1.35, ...style }}>{children}</span>;
+}
+function C({ children, size = 22, color = 'var(--ink)', style = {} }) {
+  return <span style={{ fontFamily: 'Caveat, cursive', fontSize: size, color, fontWeight: 700, lineHeight: 1.05, ...style }}>{children}</span>;
+}
+function S({ children, size = 48, color = 'var(--ink)', style = {} }) { // slab — for big numbers + headlines
+  return <span style={{ fontFamily: 'Archivo Black, system-ui', fontSize: size, color, lineHeight: 0.9, letterSpacing: '-0.02em', ...style }}>{children}</span>;
+}
+
+// Big slab number with currency
+function SlabNumber({ value, suffix = '₽', size = 80, color = 'var(--ink)', strike = false }) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4, position: 'relative' }}>
+      <span className="slab" style={{ fontSize: size, color, lineHeight: 0.9 }}>{value}</span>
+      <span className="slab" style={{ fontSize: size * 0.4, color, alignSelf: 'flex-start', marginTop: size * 0.12 }}>{suffix}</span>
+      {strike && <span style={{ position: 'absolute', left: -6, right: -6, top: '52%', height: 3, background: 'var(--red)', transform: 'rotate(-4deg)' }} />}
+    </div>
+  );
+}
+
+// Phone — low-fi sketch frame, but interior uses Bauhaus grid
+function Phone({ children, label = null, sub = null, w = 320, h = 640, seed = 1 }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+      <div style={{ position: 'relative', width: w, height: h }}>
+        <svg width={w + 10} height={h + 10} viewBox={`0 0 ${w + 10} ${h + 10}`} style={{ position: 'absolute', left: -5, top: -5, overflow: 'visible' }}>
+          <path d={roughRectPath(3, 3, w + 4, h + 4, seed, 0.9)} fill="#fff" stroke="var(--ink)" strokeWidth="2.2" strokeLinejoin="round" />
+          <path d={roughRectPath(4, 4, w + 2, h + 2, seed + 7, 0.6)} fill="none" stroke="var(--ink)" strokeWidth="1" opacity="0.5" strokeLinejoin="round" />
+        </svg>
+        <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', width: 74, height: 18, borderRadius: 12, background: 'var(--ink)', zIndex: 2 }} />
+        <div style={{ position: 'absolute', inset: '32px 14px 20px 14px', borderRadius: 6, overflow: 'hidden', background: 'var(--paper)', display: 'flex', flexDirection: 'column', border: '1.5px solid var(--ink)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px 4px', borderBottom: '1px solid var(--ink)', background: 'var(--paper-2)' }}>
+            <span className="mono" style={{ fontSize: 10, fontWeight: 700 }}>9:41</span>
+            <span className="mono" style={{ fontSize: 9, letterSpacing: 1 }}>●●● ▲ ▮</span>
+          </div>
+          <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>{children}</div>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0 6px' }}>
+            <div style={{ width: 80, height: 3, background: 'var(--ink)' }} />
+          </div>
+        </div>
+      </div>
+      {label && (
+        <div style={{ textAlign: 'center' }}>
+          <div className="slab" style={{ fontSize: 14, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{label}</div>
+          {sub && <H size={12} color="var(--muted)" style={{ fontStyle: 'italic' }}>{sub}</H>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Tag({ children, color = 'var(--ink)', solid = false }) {
+  return (
+    <span className="slab" style={{
+      fontSize: 10, letterSpacing: '0.08em',
+      padding: '3px 8px',
+      color: solid ? 'var(--paper)' : color,
+      background: solid ? color : 'transparent',
+      border: `1.5px solid ${color}`,
+      textTransform: 'uppercase',
+    }}>{children}</span>
+  );
+}
+
+function Check({ on = false, size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" style={{ flexShrink: 0 }}>
+      <rect x="1" y="1" width="12" height="12" fill="none" stroke="var(--ink)" strokeWidth="1.5" />
+      {on && <path d="M3 7.5 L6 10 L11 4" fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+    </svg>
+  );
+}
+
+function TabBar({ active = 0 }) {
+  const items = [
+    { label: 'Сегодня', shape: 'circle' },
+    { label: 'Цикл', shape: 'bar' },
+    { label: 'Накоп.', shape: 'square' },
+    { label: 'История', shape: 'triangle' },
+    { label: 'Настр.', shape: 'halfcircle' },
+  ];
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '6px 6px 6px', borderTop: '2px solid var(--ink)', background: 'var(--paper)' }}>
+      {items.map((it, i) => (
+        <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, opacity: i === active ? 1 : 0.45 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 16 }}>
+            <Glyph shape={it.shape} fill={i === active ? 'var(--ink)' : 'none'} stroke={i === active ? null : 'var(--ink)'} size={14} />
+          </div>
+          <span className="ui" style={{ fontSize: 9, fontWeight: i === active ? 700 : 400, textTransform: 'uppercase', letterSpacing: 0.3 }}>{it.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// ── DATA per state ───────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+
+const STATE_DATA = {
+  'normal':               { available: 12400, days: 11, safe: 1130, safeTmr: 1240, bill: null, cashRisk: false },
+  'tight':                { available: 3600,  days: 9,  safe: 400,  safeTmr: 450,  bill: null, tight: true },
+  'cash-risk':            { available: -1200, days: 7,  safe: 0,    safeTmr: 0,    bill: null, cashRisk: true },
+  'payday-arrived':       { available: 0,     days: 0,  safe: 0,    safeTmr: 0,    bill: null, payday: true },
+  'payment-due-tomorrow': { available: 7800,  days: 8,  safe: 970,  safeTmr: 1110, bill: { name: 'Интернет', amount: 900, when: 'завтра' } },
+  'savings-off-track':    { available: 12400, days: 11, safe: 1130, safeTmr: 1240, bill: null, offTrack: true },
+};
+
+const STATE_LABEL_RU = {
+  'normal':               'норма',
+  'tight':                'запас мал',
+  'cash-risk':            'риск разрыва',
+  'payday-arrived':       'зарплата пришла',
+  'payment-due-tomorrow': 'платёж завтра',
+  'savings-off-track':    'цель отстаёт',
+};
+
+function useData(state) { return STATE_DATA[state] || STATE_DATA['normal']; }
+
+// Structural banner — solid Bauhaus block, one accent color
+function StateBanner({ state, compact = false }) {
+  const d = useData(state);
+  const pad = compact ? '5px 10px' : '7px 12px';
+  let color, bg, text, glyph;
+  if (d.cashRisk)      { color = 'var(--paper)'; bg = 'var(--red)';    text = 'Риск разрыва · доступно ≤ 0.';            glyph = 'triangle'; }
+  else if (d.payday)   { color = 'var(--paper)'; bg = 'var(--blue)';   text = 'Зарплата · подтвердите поступление.';      glyph = 'circle'; }
+  else if (d.tight)    { color = 'var(--ink)';   bg = 'var(--yellow)'; text = 'Запас мал · не выше 400 ₽/день.';          glyph = 'bar'; }
+  else if (d.bill)     { color = 'var(--ink)';   bg = 'var(--yellow)'; text = `${d.bill.name} ${d.bill.amount} ₽ — ${d.bill.when}. Уже учтено.`; glyph = 'square'; }
+  else if (d.offTrack) { color = 'var(--paper)'; bg = 'var(--red)';    text = 'Накопления отстают от цели.';              glyph = 'triangle'; }
+  else return null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: bg, padding: pad, margin: '8px 14px', borderLeft: '6px solid var(--ink)' }}>
+      <Glyph shape={glyph} fill={color} size={12} />
+      <span className="slab" style={{ fontSize: 10, letterSpacing: '0.05em', textTransform: 'uppercase', color }}>{text}</span>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// ── SPEC DOC (ru) ────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+
+function SpecDoc() {
+  return (
+    <div style={{ maxWidth: 960, margin: '0 auto', padding: '40px 48px 120px' }}>
+      {/* Masthead — Bauhaus asymmetric */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, marginBottom: 36, borderTop: '6px solid var(--ink)', borderBottom: '2px solid var(--ink)' }}>
+        <div style={{ padding: '20px 18px 16px', borderRight: '2px solid var(--ink)' }}>
+          <div className="slab" style={{ fontSize: 52, lineHeight: 0.95, textTransform: 'uppercase' }}>МФМ</div>
+          <H size={13} color="var(--muted)">Личные финансы между зарплатами.</H>
+        </div>
+        <div style={{ padding: '20px 18px 16px', background: 'var(--yellow)', position: 'relative' }}>
+          <div className="slab" style={{ fontSize: 20, textTransform: 'uppercase', lineHeight: 1 }}>Можно потратить<br/>сегодня —</div>
+          <div className="slab" style={{ fontSize: 20, textTransform: 'uppercase', marginTop: 4 }}>сколько?</div>
+          <div style={{ position: 'absolute', right: 12, bottom: 12 }}><Glyph shape="circle" fill="var(--red)" size={22} /></div>
+        </div>
+      </div>
+
+      {/* Terminology + Bauhaus note side-by-side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 18, marginBottom: 40 }}>
+        <SketchBox seed={1} pad={18} highlight="rgba(251,221,91,0.35)">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Glyph shape="square" fill="var(--red)" size={14} />
+            <span className="slab" style={{ fontSize: 18, textTransform: 'uppercase' }}>Словарь</span>
+          </div>
+          <div className="mono" style={{ fontSize: 12, lineHeight: 1.75 }}>
+            <Row k="Safe to spend today" v="Можно потратить сегодня" />
+            <Row k="If nothing today, tomorrow" v="Если сегодня не трачу — завтра могу" />
+            <Row k="Operational balance" v="Оперативный остаток" />
+            <Row k="Reserve buffer" v="Подушка" />
+            <Row k="Savings" v="Накопления" />
+            <Row k="Paycheck" v="Зарплата" />
+            <Row k="Pay cycle" v="Цикл" />
+            <Row k="Mandatory payment" v="Обязательный платёж" />
+            <Row k="Variable expense" v="Расход" />
+            <Row k="Transfer to savings" v="В накопления" />
+            <Row k="Withdrawal from savings" v="Снять с накоплений" />
+            <Row k="Savings goal" v="Цель" />
+            <Row k="Saving pace" v="Темп накоплений" />
+            <Row k="Nominal forecast" v="Прогноз номинально" />
+            <Row k="Real value (today money)" v="В сегодняшних деньгах" />
+            <Row k="Purchasing-power coef." v="Коэф. покупательной силы" />
+          </div>
+        </SketchBox>
+
+        <SketchBox seed={2} pad={18}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <Glyph shape="triangle" fill="var(--blue)" size={14} />
+            <span className="slab" style={{ fontSize: 18, textTransform: 'uppercase' }}>Баухаус в эскизе</span>
+          </div>
+          <ul className="ui" style={{ fontSize: 13, lineHeight: 1.6, paddingLeft: 16, margin: 0 }}>
+            <li>Модульная сетка — всё выравнено на 8-пиксельный шаг.</li>
+            <li>Асимметричный баланс — крупный блок слева/сверху, поддержка справа/снизу.</li>
+            <li>Геометрические глифы (■ ● ▲) вместо иконок.</li>
+            <li>Жирные плашки-заголовки «Archivo Black» + рукописные аннотации «Kalam / Caveat».</li>
+            <li>Цвет только как структурный акцент: <b style={{ color: 'var(--red)' }}>красный</b> = риск, <b style={{ color: 'var(--blue)' }}>синий</b> = накопления, <b style={{ color: '#b8941f' }}>жёлтый</b> = внимание.</li>
+            <li>Никакой декоративной мягкости: линии-правила, толстые рамки, прямые углы внутри сетки.</li>
+            <li>Сохранён «wobble» наружных рамок — это остаётся эскиз, а не продакшн-UI.</li>
+          </ul>
+        </SketchBox>
+      </div>
+
+      {/* A — Product logic */}
+      <Section n="A" title="Продуктовая логика">
+        <H size={16} style={{ lineHeight: 1.55, display: 'block', marginBottom: 14 }}>
+          Приложение делит ваши деньги на <B>три коробки</B> — тогда одно число может ответить на главный вопрос.
+        </H>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          <TriBox title="1. Оперативный остаток" glyph="square" color="var(--ink)" bg="var(--paper)">
+            Деньги текущего цикла. Траты и обязательные платежи — здесь. Пополняются каждой зарплатой.
+          </TriBox>
+          <TriBox title="2. Подушка" glyph="bar" color="var(--ink)" bg="var(--yellow)">
+            Неприкосновенный запас внутри оперативных. Защищает последние дни цикла. Настраивается.
+          </TriBox>
+          <TriBox title="3. Накопления" glyph="circle" color="var(--paper)" bg="var(--blue)">
+            Отдельно. <B>Никогда</B> не входят в «можно потратить сегодня». Свой прогноз и цели.
+          </TriBox>
+        </div>
+
+        <div style={{ marginTop: 24 }}>
+          <SubHead>Главный цикл</SubHead>
+          <ol className="ui" style={{ fontSize: 14, lineHeight: 1.65, paddingLeft: 20, marginTop: 6 }}>
+            <li>Пришла зарплата → пополняется оперативный остаток, цикл обнуляется.</li>
+            <li>Вычитаются ближайшие обязательные платежи, плановые переводы в накопления, подушка.</li>
+            <li>Остаток ÷ дни до следующей зарплаты = <B>можно потратить сегодня</B>.</li>
+            <li>Каждый новый расход мгновенно пересчитывает остаток на оставшиеся дни.</li>
+            <li>Не потратили сегодня → завтра число вырастет. Перетратили → завтра меньше. Без вины.</li>
+          </ol>
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <SubHead>Принципы</SubHead>
+          <ul className="ui" style={{ fontSize: 14, lineHeight: 1.7, paddingLeft: 20, marginTop: 6 }}>
+            <li><B>Один ответ на главном экране.</B> Всё остальное — во вторую очередь.</li>
+            <li><B>Накопления неприкосновенны.</B> Они не участвуют в формуле дня.</li>
+            <li><B>Прогноз реалистичный.</B> Рядом с номиналом — покупательная сила сегодня.</li>
+            <li><B>Минимум графики.</B> Только дневные полосы там, где помогают решению.</li>
+            <li><B>Сдержанность.</B> Цвет — только сигнал состояния, не декорация.</li>
+          </ul>
+        </div>
+      </Section>
+
+      {/* B — Data model */}
+      <Section n="B" title="Модель данных">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Entity name="PayCycle" ru="Цикл" fields={[['id', 'uuid'], ['startDate', 'дата'], ['endDate', 'дата  (зарплата − 1)'], ['openingOperational', 'деньги'], ['expectedIncome', 'деньги']]} />
+          <Entity name="Income" ru="Доход" fields={[['id', 'uuid'], ['amount', 'деньги'], ['expectedDate', 'дата'], ['receivedDate', 'дата?'], ['kind', "'paycheck' | 'other'"]]} />
+          <Entity name="MandatoryPayment" ru="Обязательный платёж" fields={[['id', 'uuid'], ['title', 'строка'], ['amount', 'деньги'], ['dueDate', 'дата'], ['recurrence', "'monthly' | 'once'"], ['status', "'scheduled' | 'paid' | 'missed'"]]} />
+          <Entity name="VariableExpense" ru="Расход" fields={[['id', 'uuid'], ['amount', 'деньги'], ['date', 'дата'], ['category', 'строка?'], ['note', 'строка?']]} />
+          <Entity name="Reserve" ru="Подушка" fields={[['amount', 'деньги'], ['policy', "'flat' | 'perCycle'"]]} />
+          <Entity name="Savings" ru="Накопления" fields={[['balance', 'деньги'], ['openedAt', 'дата'], ['baselineBalance', 'деньги']]} />
+          <Entity name="TransferToSavings" ru="В накопления" fields={[['id', 'uuid'], ['amount', 'деньги'], ['date', 'дата'], ['planned', 'bool'], ['linkedGoalId', 'uuid?']]} />
+          <Entity name="WithdrawalFromSavings" ru="Снятие" fields={[['id', 'uuid'], ['amount', 'деньги'], ['date', 'дата'], ['reason', 'строка?']]} />
+          <Entity name="SavingsGoal" ru="Цель" fields={[['id', 'uuid'], ['title', 'строка'], ['target', 'деньги'], ['deadline', 'дата?'], ['priority', 'int']]} />
+          <Entity name="CalculationSettings" ru="Настройки" fields={[['payday1', 'день месяца'], ['payday2', 'день месяца'], ['typicalPaycheck1', 'деньги'], ['typicalPaycheck2', 'деньги'], ['reserveAmount', 'деньги'], ['purchasingPowerCoef', '0.90 по умолчанию'], ['includeTodayInDivisor', 'bool']]} />
+        </div>
+      </Section>
+
+      {/* C — Formulas */}
+      <Section n="C" title="Формулы">
+        <Formula name="availableUntilNextPaycheck  ·  Доступно до зарплаты">
+{`= оперативныйОстаток
+  + сумма(Доходов где expectedDate ≤ дата_следующей_зп, ещё не получены)
+  − сумма(ОбязПлатежей где dueDate ≤ дата_следующей_зп, status='scheduled')
+  − подушка
+  − сумма(плановых ВНакопления где date ≤ дата_следующей_зп)`}
+        </Formula>
+        <Formula name="remainingDays  ·  Осталось дней">
+{`= дата_следующей_зп − сегодня        (включая сегодня)
+  min = 1                              (деление на ноль запрещено)`}
+        </Formula>
+        <Formula name="safeToSpendToday  ·  Можно потратить сегодня" highlight>
+{`= max(0, availableUntilNextPaycheck) / remainingDays`}
+        </Formula>
+        <Formula name="ifZeroToday_tomorrow  ·  Если сегодня не трачу — завтра могу">
+{`= availableUntilNextPaycheck / max(1, remainingDays − 1)
+  // если remainingDays = 1 → уходит в следующий цикл`}
+        </Formula>
+        <Formula name="monthlySavingPace  ·  Темп накоплений">
+{`= (savings.balance − savings.baselineBalance) / месяцыСОткрытия
+  // запасной расчёт: скользящее среднее за 3 месяца`}
+        </Formula>
+        <Formula name="savingsForecastNominal  ·  Прогноз номинально">
+{`= savings.balance + monthlySavingPace × месяцыДо(targetDate)`}
+        </Formula>
+        <Formula name="savingsForecastReal  ·  В сегодняшних деньгах" highlight>
+{`годы     = дней(сегодня → targetDate) / 365
+  real    = номинал × coef ^ годы
+  // coef по умолчанию = 0.90  (≈10 % эрозии в год)`}
+        </Formula>
+        <Formula name="goalGap  ·  Разрыв до цели">
+{`= max(0, goal.target − savings.balance)
+  месяцевДоЦели = goalGap / monthlySavingPace   (∞ если темп = 0)
+  вГрафике = дедлайн не задан
+            ИЛИ месяцевДоЦели ≤ месяцевДо(дедлайн)`}
+        </Formula>
+      </Section>
+
+      {/* D — Edge cases */}
+      <Section n="D" title="Граничные случаи">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+          {[
+            ['Доступно ≤ 0', 'Состояние «риск разрыва». Можно потратить сегодня = 0 ₽. Предложить: отменить плановый перевод, снизить подушку, перенести платёж.'],
+            ['remainingDays = 0 (зарплата сегодня)', 'Состояние «зарплата пришла». Скрыть дневное число, запросить подтверждение поступления → новый цикл.'],
+            ['Зарплата задержалась', 'Окно прощения 48 ч по expectedDate. Дальше — пометить как missed и пересчитать с меньшим остатком.'],
+            ['Просрочен обязательный платёж', 'Всё равно вычитается из доступного. Баннер на главном экране. Прошлые значения «можно потратить сегодня» не переписываются.'],
+            ['Расход задним числом', 'Пересчёт текущего цикла. Сегодняшнее число поглощает разницу. Дельта отображается.'],
+            ['Расход больше лимита', 'Разрешить с подтверждением: «остаётся X на N дней». Блокировки нет.'],
+            ['Снятие с накоплений', 'Переходит в оперативный остаток. В истории — отдельный тип. Не учитывается в темпе.'],
+            ['Новый пользователь', 'Онбординг: 2 даты зарплаты, типичные суммы, текущий остаток, подушка. Расчёт доступен с первого сохранения.'],
+            ['Зарплата на выходные / короткий месяц', 'Сдвиг на ближайший рабочий день до. Для 31-го числа — «последний день месяца».'],
+            ['Подушка больше оперативного остатка', 'Доступно отрицательное → риск разрыва. Подушка не тратится автоматически.'],
+            ['Коэф. = 1.0', 'Real = номинал. Допустимо. Коэф. > 1 запрещён в настройках.'],
+            ['Темп накоплений ≤ 0', 'Прогноз ровный или падает. Метка «без прогресса». Не скрываем.'],
+            ['Дедлайн цели в прошлом', 'Метка «просрочено». Разрыв отображается. Предлагается новый срок.'],
+            ['Часовые пояса / DST', 'Счёт дней — по локальной дате, не по timestamp. «Сегодня» меняется в полночь.'],
+          ].map(([k, v], i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '10px 12px', borderBottom: '1px dashed var(--thin)', borderRight: i % 2 === 0 ? '1px dashed var(--thin)' : 'none' }}>
+              <Glyph shape="square" fill="var(--ink)" size={8} />
+              <div>
+                <div className="slab" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 2 }}>{k}</div>
+                <H size={12} color="var(--muted)">{v}</H>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* E — Screen architecture */}
+      <Section n="E" title="Архитектура экранов">
+        <H size={14} color="var(--muted)" style={{ display: 'block', marginBottom: 14, lineHeight: 1.55 }}>
+          Пять вкладок. «Сегодня» — якорь: 90% открытий. Остальные объясняют и настраивают числа с главной.
+        </H>
+        <div>
+          <Screen n="1" name="Сегодня" pr="Открыть за 1 с, прочитать за 10 с" d="Можно потратить сегодня (главное) · Если сегодня не трачу — завтра могу · Дни до зарплаты · Ближайший платёж · Записать расход · В накопления." />
+          <Screen n="2" name="Цикл / прогноз" pr="Доверие к числу" d="Таймлайн цикла по дням: дата, дневная норма, маркеры обязательных платежей, факт. Предупреждения для дней с малым запасом." />
+          <Screen n="3" name="Накопления" pr="Долгий горизонт" d="Накоплено (главное) · Темп накоплений · Прогноз на дату · Рядом — в сегодняшних деньгах · Цели с разрывом и статусом." />
+          <Screen n="4" name="История" pr="Журнал" d="Общая лента: доходы, расходы, переводы в накопления, снятия. Фильтр по типу. Клик — редактирование записи." />
+          <Screen n="5" name="Настройки" pr="Редко и однократно" d="Две даты зарплаты · типичные суммы · подушка · коэф. покупательной силы · параметры расчёта." />
+        </div>
+
+        <div style={{ marginTop: 28 }}>
+          <SubHead>Состояния</SubHead>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 10 }}>
+            <StateCard code="normal" ru="норма" color="var(--ink)" desc="Доступно > 1 дня запаса. Цикл идёт по плану." />
+            <StateCard code="tight" ru="запас мал" color="var(--yellow)" desc="Менее 3 дней комфортного уровня. Напоминание." />
+            <StateCard code="cash-risk" ru="риск разрыва" color="var(--red)" desc="Доступно ≤ 0. Можно потратить сегодня = 0. Требуется действие." />
+            <StateCard code="payday-arrived" ru="зарплата пришла" color="var(--blue)" desc="Сегодня ожидается доход. Подтверждение → новый цикл." />
+            <StateCard code="payment-due-tomorrow" ru="платёж завтра" color="var(--yellow)" desc="Обязательный платёж завтра. Уже вычтен из доступного." />
+            <StateCard code="savings-off-track" ru="цель отстаёт" color="var(--red)" desc="Темп накоплений не достигает цели к сроку. Показывается на «Накопления»." />
+          </div>
+        </div>
+      </Section>
+
+      <div style={{ textAlign: 'center', marginTop: 48, padding: 20, borderTop: '3px solid var(--ink)' }}>
+        <span className="slab" style={{ fontSize: 18, textTransform: 'uppercase' }}>→ Вкладка «Каркасы» — три варианта главного экрана и пять экранов целиком.</span>
+      </div>
+    </div>
+  );
+}
+
+function Row({ k, v }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', borderBottom: '1px dotted var(--thin)', padding: '2px 0', gap: 10 }}>
+      <span style={{ color: 'var(--muted)' }}>{k}</span>
+      <span style={{ fontWeight: 700, color: 'var(--ink)' }}>{v}</span>
+    </div>
+  );
+}
+function B({ children }) {
+  return <span style={{ fontWeight: 700, backgroundImage: 'linear-gradient(transparent 68%, rgba(251,221,91,0.6) 68%)' }}>{children}</span>;
+}
+function Section({ n, title, children }) {
+  return (
+    <div style={{ marginBottom: 48, paddingTop: 14, borderTop: '2px solid var(--ink)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', alignItems: 'baseline', gap: 20, marginBottom: 18 }}>
+        <div className="slab" style={{ fontSize: 72, color: 'var(--red)', lineHeight: 0.85 }}>{n}</div>
+        <div>
+          <div className="slab" style={{ fontSize: 36, textTransform: 'uppercase', letterSpacing: '-0.01em' }}>{title}</div>
+          <Rule color="var(--ink)" thick={3} style={{ marginTop: 6, width: 180 }} />
+        </div>
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+function SubHead({ children }) {
+  return <div className="slab" style={{ fontSize: 16, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{children}</div>;
+}
+function TriBox({ title, children, glyph, color, bg }) {
+  return (
+    <div style={{ background: bg, color, padding: 14, border: '2px solid var(--ink)', position: 'relative' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Glyph shape={glyph} fill={color} size={16} />
+        <span className="slab" style={{ fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.03em', color }}>{title}</span>
+      </div>
+      <H size={13} color={color} style={{ lineHeight: 1.5 }}>{children}</H>
+    </div>
+  );
+}
+function Entity({ name, ru, fields }) {
+  return (
+    <SketchBox seed={name.length + 2} pad={12}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span className="slab" style={{ fontSize: 14, textTransform: 'uppercase' }}>{name}</span>
+        <H size={11} color="var(--muted)" style={{ fontStyle: 'italic' }}>· {ru}</H>
+      </div>
+      <div className="mono" style={{ fontSize: 11, lineHeight: 1.7 }}>
+        {fields.map(([k, t], i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: i < fields.length - 1 ? '1px dotted var(--thin)' : 'none', padding: '1px 0' }}>
+            <span style={{ fontWeight: 700 }}>{k}</span>
+            <span style={{ color: 'var(--muted)' }}>{t}</span>
+          </div>
+        ))}
+      </div>
+    </SketchBox>
+  );
+}
+function Formula({ name, children, highlight = false }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <Glyph shape={highlight ? 'circle' : 'square'} fill={highlight ? 'var(--red)' : 'var(--ink)'} size={12} />
+        <span className="slab" style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{name}</span>
+      </div>
+      <SketchBox seed={name.length + 4} pad={12} highlight={highlight ? 'rgba(251,221,91,0.5)' : null}>
+        <pre className="mono" style={{ margin: 0, fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{children}</pre>
+      </SketchBox>
+    </div>
+  );
+}
+function Screen({ n, name, pr, d }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr', gap: 16, padding: '10px 0', borderBottom: '1px dashed var(--thin)' }}>
+      <div className="slab" style={{ fontSize: 28, color: 'var(--blue)', lineHeight: 1 }}>{n}</div>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', justifyContent: 'space-between' }}>
+          <span className="slab" style={{ fontSize: 18, textTransform: 'uppercase' }}>{name}</span>
+          <H size={12} color="var(--muted)" style={{ fontStyle: 'italic' }}>{pr}</H>
+        </div>
+        <H size={13} style={{ lineHeight: 1.5, display: 'block', marginTop: 2 }}>{d}</H>
+      </div>
+    </div>
+  );
+}
+function StateCard({ code, ru, color, desc }) {
+  return (
+    <div style={{ border: '1.5px solid var(--ink)', padding: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{ width: 14, height: 14, background: color, border: '1.5px solid var(--ink)' }} />
+        <span className="slab" style={{ fontSize: 12, textTransform: 'uppercase' }}>{ru}</span>
+      </div>
+      <H size={11} color="var(--muted)">{desc}</H>
+      <div className="mono" style={{ fontSize: 9, color: 'var(--muted)', marginTop: 3 }}>{code}</div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// ── DASHBOARD — 3 HERO VARIATIONS ────────────────────────────
+// ═════════════════════════════════════════════════════════════
+
+// A. Плашка — крупное число, асимметричный баланс, жёлтый блок сверху
+function DashMassive({ state }) {
+  const d = useData(state);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* header band */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '6px 14px 4px', background: 'var(--paper-2)', borderBottom: '2px solid var(--ink)' }}>
+        <span className="slab" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>ср · 22 апр</span>
+        <Tag color="var(--ink)">до зарплаты: {d.days} дн.</Tag>
+      </div>
+      <StateBanner state={state} compact />
+
+      {/* Hero massive — yellow block on left, giant number spans */}
+      <div style={{ padding: '14px 14px 0', position: 'relative' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '24px 1fr', gap: 10, alignItems: 'stretch' }}>
+          <div style={{ background: 'var(--yellow)', border: '2px solid var(--ink)' }} />
+          <div>
+            <span className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Можно потратить сегодня</span>
+            <div style={{ marginTop: 6 }}>
+              <SlabNumber value={d.safe.toLocaleString('ru-RU')} suffix="₽" size={d.cashRisk ? 64 : 74} color={d.cashRisk ? 'var(--red)' : 'var(--ink)'} strike={d.cashRisk} />
+            </div>
+          </div>
+        </div>
+        <Rule color="var(--ink)" thick={2} style={{ marginTop: 10 }} />
+        {/* secondary: tomorrow */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, alignItems: 'end', paddingTop: 8 }}>
+          <H size={11} color="var(--muted)" style={{ lineHeight: 1.3 }}>Если сегодня не трачу —<br/>завтра могу:</H>
+          <span className="slab" style={{ fontSize: 28 }}>{d.safeTmr.toLocaleString('ru-RU')} <span style={{ fontSize: 16 }}>₽</span></span>
+        </div>
+      </div>
+
+      <div style={{ flex: 1 }} />
+
+      {/* strip: balance pieces */}
+      <div style={{ padding: '0 14px', display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', borderTop: '2px solid var(--ink)' }}>
+        <Strip label="Оперативный остаток" value="12 400" />
+        <Strip label="Подушка" value="2 000" sep />
+        <Strip label="Накопления" value="43 100" sep color="var(--blue)" />
+      </div>
+
+      {/* quick actions — two big rectangles */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, borderTop: '2px solid var(--ink)' }}>
+        <div style={{ padding: '10px 12px', background: 'var(--ink)', color: 'var(--paper)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Glyph shape="square" fill="var(--paper)" size={10} />
+          <span className="slab" style={{ fontSize: 12, textTransform: 'uppercase' }}>Записать расход</span>
+        </div>
+        <div style={{ padding: '10px 12px', background: 'var(--blue)', color: 'var(--paper)', display: 'flex', alignItems: 'center', gap: 8, borderLeft: '2px solid var(--ink)' }}>
+          <Glyph shape="circle" fill="var(--paper)" size={10} />
+          <span className="slab" style={{ fontSize: 12, textTransform: 'uppercase' }}>В накопления</span>
+        </div>
+      </div>
+
+      <TabBar active={0} />
+    </div>
+  );
+}
+
+function Strip({ label, value, sep = false, color = 'var(--ink)' }) {
+  return (
+    <div style={{ padding: '6px 8px', borderLeft: sep ? '1.5px solid var(--ink)' : 'none' }}>
+      <div className="slab" style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>{label}</div>
+      <div className="slab" style={{ fontSize: 14, color }}>{value} <span style={{ fontSize: 9 }}>₽</span></div>
+    </div>
+  );
+}
+
+// B. Клетки — число + дневная полоса из 11 клеток по циклу
+function DashBeads({ state }) {
+  const d = useData(state);
+  const N = Math.max(d.days, 6);
+  const arr = Array.from({ length: Math.min(N, 11) }, (_, i) => ({
+    tight: i === 2 || i === 6, today: i === 0,
+  }));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '6px 14px 4px', background: 'var(--paper-2)', borderBottom: '2px solid var(--ink)' }}>
+        <span className="slab" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>ср · 22 апр</span>
+        <Tag color="var(--ink)">Цикл · {d.days}/14 дн.</Tag>
+      </div>
+      <StateBanner state={state} compact />
+
+      {/* hero split */}
+      <div style={{ padding: '12px 14px 8px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'end' }}>
+          <div>
+            <span className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Можно потратить сегодня</span>
+            <div><SlabNumber value={d.safe.toLocaleString('ru-RU')} suffix="₽" size={58} color={d.cashRisk ? 'var(--red)' : 'var(--ink)'} strike={d.cashRisk} /></div>
+          </div>
+          <div style={{ border: '2px solid var(--ink)', padding: '5px 8px', textAlign: 'right' }}>
+            <div className="slab" style={{ fontSize: 8, textTransform: 'uppercase', color: 'var(--muted)' }}>если 0 — завтра</div>
+            <div className="slab" style={{ fontSize: 20 }}>{d.safeTmr.toLocaleString('ru-RU')} ₽</div>
+          </div>
+        </div>
+      </div>
+
+      {/* bead row — 11 cells, today is solid filled */}
+      <div style={{ padding: '0 14px 10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${arr.length}, 1fr)`, gap: 3, border: '2px solid var(--ink)' }}>
+          {arr.map((x, i) => (
+            <div key={i} style={{
+              aspectRatio: '1 / 1.2',
+              background: x.today ? 'var(--ink)' : (x.tight ? 'var(--yellow)' : 'var(--paper)'),
+              borderRight: i < arr.length - 1 ? '1.5px solid var(--ink)' : 'none',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+            }}>
+              <span className="slab" style={{ fontSize: 10, color: x.today ? 'var(--paper)' : 'var(--ink)' }}>
+                {22 + i}
+              </span>
+              {x.tight && !x.today && <Glyph shape="triangle" fill="var(--red)" size={8} />}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+          <H size={9} color="var(--muted)">сегодня</H>
+          <H size={9} color="var(--muted)">3 мая · зарплата</H>
+        </div>
+      </div>
+
+      {/* bill */}
+      <div style={{ padding: '0 14px', flex: 1 }}>
+        <div style={{ borderTop: '1.5px solid var(--ink)', borderBottom: '1.5px solid var(--ink)', padding: '8px 0', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
+          <div>
+            <div className="slab" style={{ fontSize: 10, textTransform: 'uppercase', color: 'var(--muted)' }}>Ближайший платёж</div>
+            <div className="slab" style={{ fontSize: 14 }}>Интернет · 23 апр</div>
+          </div>
+          <span className="slab" style={{ fontSize: 18 }}>900 ₽</span>
+        </div>
+      </div>
+
+      {/* actions */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, borderTop: '2px solid var(--ink)' }}>
+        <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Glyph shape="square" fill="var(--ink)" size={10} />
+          <span className="slab" style={{ fontSize: 12, textTransform: 'uppercase' }}>Записать расход</span>
+        </div>
+        <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, borderLeft: '2px solid var(--ink)', background: 'var(--blue)', color: 'var(--paper)' }}>
+          <Glyph shape="circle" fill="var(--paper)" size={10} />
+          <span className="slab" style={{ fontSize: 12, textTransform: 'uppercase' }}>В накопления</span>
+        </div>
+      </div>
+
+      <TabBar active={0} />
+    </div>
+  );
+}
+
+// C. Конверты — две области: «Оперативный остаток» и «Накопления» отдельно
+function DashEnvelopes({ state }) {
+  const d = useData(state);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '6px 14px 4px', background: 'var(--paper-2)', borderBottom: '2px solid var(--ink)' }}>
+        <span className="slab" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>ср · 22 апр</span>
+        <Tag color="var(--ink)">до зарплаты: {d.days} дн.</Tag>
+      </div>
+      <StateBanner state={state} compact />
+
+      {/* Operational envelope */}
+      <div style={{ padding: '10px 14px 6px' }}>
+        <div style={{ border: '2px solid var(--ink)', position: 'relative' }}>
+          <div style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '3px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Оперативный остаток</span>
+            <span className="slab" style={{ fontSize: 10 }}>12 400 ₽ всего</span>
+          </div>
+          <div style={{ padding: '10px 12px' }}>
+            <div className="slab" style={{ fontSize: 9, textTransform: 'uppercase', color: 'var(--muted)' }}>Можно потратить сегодня</div>
+            <SlabNumber value={d.safe.toLocaleString('ru-RU')} suffix="₽" size={58} color={d.cashRisk ? 'var(--red)' : 'var(--ink)'} strike={d.cashRisk} />
+            <div style={{ marginTop: 4 }}>
+              <H size={11} color="var(--muted)">или <b style={{ color: 'var(--ink)' }}>{d.safeTmr.toLocaleString('ru-RU')} ₽</b> завтра, если сегодня не трачу</H>
+            </div>
+            {/* segmented bar */}
+            <div style={{ marginTop: 10, display: 'flex', height: 12, border: '1.5px solid var(--ink)' }}>
+              <div style={{ flex: 3, background: 'var(--ink)' }} />
+              <div style={{ flex: 5, background: 'repeating-linear-gradient(135deg, var(--ink) 0 1px, transparent 1px 4px)', borderLeft: '1.5px solid var(--ink)', borderRight: '1.5px solid var(--ink)' }} />
+              <div style={{ flex: 2, background: 'var(--yellow)' }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
+              <span className="slab" style={{ fontSize: 8, color: 'var(--muted)' }}>потрачено</span>
+              <span className="slab" style={{ fontSize: 8, color: 'var(--muted)' }}>свободно</span>
+              <span className="slab" style={{ fontSize: 8, color: 'var(--muted)' }}>подушка</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Savings envelope — blue */}
+      <div style={{ padding: '0 14px' }}>
+        <div style={{ border: '2px solid var(--ink)' }}>
+          <div style={{ background: 'var(--blue)', color: 'var(--paper)', padding: '3px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Накопления · отдельно</span>
+            <Glyph shape="circle" fill="var(--paper)" size={10} />
+          </div>
+          <div style={{ padding: '8px 12px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
+            <div>
+              <SlabNumber value="43 100" suffix="₽" size={32} color="var(--blue)" />
+              <div style={{ marginTop: 2 }}>
+                <H size={10} color="var(--muted)">темп накоплений +1 800 ₽/мес · прогноз 31.12 → 53 400 ₽</H>
+              </div>
+            </div>
+            <div style={{ padding: '6px 10px', border: '1.5px solid var(--blue)' }}>
+              <span className="slab" style={{ fontSize: 10, color: 'var(--blue)', textTransform: 'uppercase' }}>В накопления</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1 }} />
+
+      {/* single big record CTA */}
+      <div style={{ padding: '10px 14px 6px' }}>
+        <div style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, border: '2px solid var(--ink)' }}>
+          <Glyph shape="square" fill="var(--paper)" size={12} />
+          <span className="slab" style={{ fontSize: 16, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Записать расход</span>
+        </div>
+      </div>
+
+      <TabBar active={0} />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// ── OTHER SCREENS ────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+
+function ScreenRunway() {
+  const today = 22;
+  const days = [];
+  for (let i = 0; i < 11; i++) {
+    const tight = (i === 2 || i === 6);
+    const safe = 1130 + Math.round(Math.sin(i * 1.3) * 100) - (tight ? 400 : 0);
+    days.push({ date: today + i, safe, bill: i === 2 ? 'Интернет 900 ₽' : (i === 6 ? 'Спортзал 1 200 ₽' : null), today: i === 0 });
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 14px 6px', borderBottom: '2px solid var(--ink)' }}>
+        <div className="slab" style={{ fontSize: 24, textTransform: 'uppercase' }}>Цикл</div>
+        <H size={11} color="var(--muted)">22 апр → 2 мая · 11 дней</H>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)' }}>
+        <Strip label="Доступно" value="12 400" />
+        <Strip label="Обязательные" value="2 100" sep />
+        <Strip label="Подушка" value="2 000" sep />
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '6px 14px 10px' }}>
+        {days.map((d, i) => (
+          <div key={i} style={{
+            display: 'grid', gridTemplateColumns: '36px 1fr 90px', alignItems: 'center', gap: 8,
+            padding: '6px 8px',
+            borderBottom: '1px dashed var(--thin)',
+            background: d.today ? 'var(--yellow)' : 'transparent',
+            borderLeft: d.today ? '4px solid var(--red)' : '4px solid transparent',
+          }}>
+            <div>
+              <span className="slab" style={{ fontSize: 16 }}>{d.date}</span>
+              <div><H size={8} color="var(--muted)">апр</H></div>
+            </div>
+            <div>
+              <H size={11} weight={d.today ? 700 : 400}>{d.today ? 'СЕГОДНЯ · можно потратить' : 'если по темпу'}</H>
+              {d.bill && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                  <Glyph shape="triangle" fill="var(--red)" size={8} />
+                  <H size={10} color="var(--red)" weight={700}>{d.bill}</H>
+                </div>
+              )}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span className="slab" style={{ fontSize: 18, color: d.safe < 500 ? 'var(--red)' : 'var(--ink)' }}>{d.safe} ₽</span>
+            </div>
+          </div>
+        ))}
+        <div style={{ padding: '10px 8px', borderTop: '2px solid var(--ink)', marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--blue)', color: 'var(--paper)' }}>
+          <span className="slab" style={{ fontSize: 14 }}>3 мая · зарплата</span>
+          <span className="slab" style={{ fontSize: 16 }}>+ 45 000 ₽</span>
+        </div>
+      </div>
+      <TabBar active={1} />
+    </div>
+  );
+}
+
+function ScreenSavings({ state }) {
+  const off = state === 'savings-off-track';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 14px 6px', borderBottom: '2px solid var(--ink)' }}>
+        <div className="slab" style={{ fontSize: 24, textTransform: 'uppercase' }}>Накопления</div>
+      </div>
+      {off && <StateBanner state={state} compact />}
+
+      {/* hero saved */}
+      <div style={{ padding: '10px 14px 6px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
+          <div>
+            <span className="slab" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Накопления</span>
+            <div><SlabNumber value="43 100" suffix="₽" size={52} color="var(--blue)" /></div>
+            <H size={11} color="var(--muted)">темп накоплений <B>1 800 ₽/мес</B> · с янв 2026</H>
+          </div>
+          <div style={{ background: 'var(--blue)', padding: 6 }}><Glyph shape="circle" fill="var(--paper)" size={18} /></div>
+        </div>
+      </div>
+
+      {/* Forecast panel */}
+      <div style={{ padding: '0 14px 8px' }}>
+        <div style={{ border: '2px solid var(--ink)', padding: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span className="slab" style={{ fontSize: 10, textTransform: 'uppercase' }}>Прогноз на</span>
+            <span className="slab" style={{ fontSize: 16 }}>31 дек 2026</span>
+          </div>
+          {/* slider */}
+          <div style={{ height: 6, background: 'var(--ink)', position: 'relative', margin: '6px 0 10px' }}>
+            <div style={{ position: 'absolute', left: '60%', top: -6, width: 18, height: 18, background: 'var(--yellow)', border: '2px solid var(--ink)' }} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+            <div style={{ borderRight: '1.5px solid var(--ink)', paddingRight: 8 }}>
+              <H size={9} color="var(--muted)" style={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>Прогноз номинально</H>
+              <div><SlabNumber value="58 300" suffix="₽" size={24} /></div>
+            </div>
+            <div style={{ paddingLeft: 8 }}>
+              <H size={9} color="var(--muted)" style={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>В сегодняшних деньгах</H>
+              <div><SlabNumber value="53 800" suffix="₽" size={24} color={off ? 'var(--muted)' : 'var(--ink)'} /></div>
+            </div>
+          </div>
+          <div className="mono" style={{ fontSize: 9, color: 'var(--muted)', marginTop: 4 }}>× coef 0.90 ^ (0.7 лет)</div>
+        </div>
+      </div>
+
+      <div style={{ padding: '0 14px', flex: 1, overflow: 'auto' }}>
+        <div className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Цели</div>
+        <Goal title="Подушка" cur={43100} target={60000} due="авг" ok={!off} />
+        <Goal title="Отпуск" cur={4200} target={12000} due="июн" ok={false} />
+        <Goal title="Новый ноутбук" cur={0} target={180000} due="дек" ok={true} />
+      </div>
+      <TabBar active={2} />
+    </div>
+  );
+}
+function Goal({ title, cur, target, due, ok }) {
+  const pct = Math.min(1, cur / target);
+  return (
+    <div style={{ border: '1.5px solid var(--ink)', padding: 8, marginBottom: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="slab" style={{ fontSize: 12 }}>{title}</span>
+        <Tag color={ok ? 'var(--ink)' : 'var(--red)'} solid={!ok}>{ok ? 'в графике' : 'отстаёт'}</Tag>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+        <H size={10} color="var(--muted)">{cur.toLocaleString('ru-RU')} / {target.toLocaleString('ru-RU')} ₽</H>
+        <H size={10} color="var(--muted)">до {due}</H>
+      </div>
+      <div style={{ marginTop: 4, height: 8, background: 'var(--paper-2)', border: '1.5px solid var(--ink)' }}>
+        <div style={{ width: `${pct * 100}%`, height: '100%', background: ok ? 'var(--blue)' : 'repeating-linear-gradient(135deg, var(--red) 0 2px, transparent 2px 5px)' }} />
+      </div>
+    </div>
+  );
+}
+
+function ScreenHistory() {
+  const items = [
+    { d: '22 апр', t: 'Кофе', amt: -180, k: 'exp' },
+    { d: '22 апр', t: 'Обед', amt: -430, k: 'exp' },
+    { d: '21 апр', t: 'В накопления', amt: -3000, k: 'xfer' },
+    { d: '21 апр', t: 'Продукты', amt: -1420, k: 'exp' },
+    { d: '20 апр', t: 'Зарплата', amt: 45000, k: 'inc' },
+    { d: '20 апр', t: 'Аренда', amt: -28000, k: 'bill' },
+    { d: '19 апр', t: 'Бензин', amt: -1200, k: 'exp' },
+    { d: '18 апр', t: 'Возврат · рубашка', amt: 790, k: 'inc' },
+    { d: '17 апр', t: 'Ужин', amt: -1100, k: 'exp' },
+  ];
+  const map = { exp: { s: 'square', c: 'var(--ink)' }, inc: { s: 'circle', c: 'var(--blue)' }, xfer: { s: 'circle', c: 'var(--blue)' }, bill: { s: 'triangle', c: 'var(--red)' } };
+  const label = { exp: 'расход', inc: 'доход', xfer: 'перевод', bill: 'платёж' };
+  const filters = ['всё', 'расходы', 'доходы', 'переводы', 'платежи'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 14px 6px', borderBottom: '2px solid var(--ink)' }}>
+        <div className="slab" style={{ fontSize: 24, textTransform: 'uppercase' }}>История</div>
+      </div>
+      <div style={{ display: 'flex', gap: 4, padding: '8px 14px', overflowX: 'auto' }}>
+        {filters.map((f, i) => (
+          <div key={f} style={{ padding: '3px 8px', border: '1.5px solid var(--ink)', background: i === 0 ? 'var(--ink)' : 'transparent', color: i === 0 ? 'var(--paper)' : 'var(--ink)', whiteSpace: 'nowrap' }}>
+            <span className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{f}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '0 14px 10px' }}>
+        {items.map((x, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '20px 1fr auto', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px dashed var(--thin)' }}>
+            <div style={{ background: map[x.k].c, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Glyph shape={map[x.k].s} fill="var(--paper)" size={10} />
+            </div>
+            <div>
+              <span className="slab" style={{ fontSize: 12 }}>{x.t}</span>
+              <div><H size={9} color="var(--muted)">{x.d} · {label[x.k]}</H></div>
+            </div>
+            <span className="slab" style={{ fontSize: 14, color: x.amt > 0 ? 'var(--blue)' : 'var(--ink)' }}>
+              {x.amt > 0 ? '+' : '−'}{Math.abs(x.amt).toLocaleString('ru-RU')} ₽
+            </span>
+          </div>
+        ))}
+      </div>
+      <TabBar active={3} />
+    </div>
+  );
+}
+
+function ScreenSettings() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '10px 14px 6px', borderBottom: '2px solid var(--ink)' }}>
+        <div className="slab" style={{ fontSize: 24, textTransform: 'uppercase' }}>Настройки</div>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 14px' }}>
+        <Group title="Цикл зарплаты">
+          <SRow label="1-я зарплата" value="5 число" />
+          <SRow label="2-я зарплата" value="20 число" />
+          <SRow label="Типичная сумма #1" value="22 500 ₽" />
+          <SRow label="Типичная сумма #2" value="22 500 ₽" />
+        </Group>
+        <Group title="Деньги">
+          <SRow label="Подушка" value="2 000 ₽" />
+          <SRow label="Коэф. покупательной силы" value="0.90 / год" sub="(≈10 % эрозии в год)" />
+        </Group>
+        <Group title="Расчёт">
+          <SRow label="Учитывать сегодня в делителе" toggle />
+          <SRow label="Округлять «можно потратить сегодня»" value="до 10 ₽" />
+          <SRow label="Автовычитать плановые переводы" toggle />
+        </Group>
+        <Group title="Данные">
+          <SRow label="Экспорт CSV" link />
+          <SRow label="Сбросить цикл вручную" link />
+        </Group>
+      </div>
+      <TabBar active={4} />
+    </div>
+  );
+}
+function Group({ title, children }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>{title}</div>
+      <div style={{ border: '1.5px solid var(--ink)' }}>{children}</div>
+    </div>
+  );
+}
+function SRow({ label, value, sub, toggle, link }) {
+  const [on, setOn] = React.useState(true);
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', borderBottom: '1px dashed var(--thin)' }}>
+      <div>
+        <H size={12}>{label}</H>
+        {sub && <div><H size={9} color="var(--muted)">{sub}</H></div>}
+      </div>
+      {toggle ? (
+        <div onClick={() => setOn(!on)} style={{ width: 30, height: 16, border: '1.5px solid var(--ink)', background: on ? 'var(--ink)' : 'transparent', position: 'relative', cursor: 'pointer' }}>
+          <div style={{ position: 'absolute', top: 1, left: on ? 15 : 1, width: 12, height: 12, background: on ? 'var(--yellow)' : 'var(--ink)' }} />
+        </div>
+      ) : link ? (
+        <span className="slab" style={{ fontSize: 14, color: 'var(--blue)' }}>›</span>
+      ) : (
+        <H size={12} color="var(--muted)">{value}</H>
+      )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// ── APP SHELL ────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "state": "savings-off-track",
+  "focus": "all"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tab, setTab] = React.useState('wires');
+  const [tweaksOpen, setTweaksOpen] = React.useState(false);
+  const [state, setState] = React.useState(TWEAK_DEFAULTS.state);
+  const [focus, setFocus] = React.useState('all');
+
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksOpen(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksOpen(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+  const setKey = (k, v) => window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [k]: v } }, '*');
+
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      <header className="print-header-sticky" style={{ position: 'static', background: 'var(--paper)', borderBottom: '3px solid var(--ink)', padding: '14px 28px 12px', display: 'flex', alignItems: 'center', gap: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 28, height: 28, background: 'var(--red)' }} />
+          <div style={{ width: 28, height: 28, background: 'var(--yellow)' }} />
+          <div style={{ width: 28, height: 28, borderRadius: 28, background: 'var(--blue)' }} />
+          <div className="slab" style={{ fontSize: 22, textTransform: 'uppercase', letterSpacing: '-0.01em', marginLeft: 4 }}>МФМ · Каркасы</div>
+        </div>
+      </header>
+      <div className="print-avoid"><SpecDoc /></div>
+      <div className="print-break" />
+      <div className="print-avoid"><Wires state={state} focus="all" /></div>
+    </div>
+  );
+}
+
+
+function TabBtn({ active, onClick, children }) {
+  return (
+    <div onClick={onClick} style={{
+      padding: '6px 14px', cursor: 'pointer', border: '2px solid var(--ink)',
+      background: active ? 'var(--ink)' : 'transparent',
+      color: active ? 'var(--paper)' : 'var(--ink)',
+    }}>
+      <span className="slab" style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{children}</span>
+    </div>
+  );
+}
+
+function Wires({ state, focus }) {
+  const showDash = focus === 'all' || focus === 'dash';
+  const showOther = focus === 'all' || focus === 'other';
+  return (
+    <div style={{ padding: '36px 48px 120px', maxWidth: 1440, margin: '0 auto' }}>
+      {/* intro */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 0, borderTop: '6px solid var(--ink)', borderBottom: '2px solid var(--ink)', marginBottom: 36 }}>
+        <div style={{ padding: '20px 20px 16px', borderRight: '2px solid var(--ink)' }}>
+          <div className="slab" style={{ fontSize: 40, lineHeight: 0.95, textTransform: 'uppercase' }}>F · Каркасы</div>
+          <div style={{ marginTop: 4 }}><Rule color="var(--red)" thick={4} style={{ width: 120 }} /></div>
+          <H size={14} color="var(--muted)" style={{ display: 'block', marginTop: 10, lineHeight: 1.55 }}>
+            Три варианта главного экрана «Можно потратить сегодня». Панель Tweaks — переключение шести состояний.
+          </H>
+        </div>
+        <div style={{ padding: '20px 20px 16px', background: 'var(--yellow)', position: 'relative' }}>
+          <div className="slab" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Текущее состояние</div>
+          <div className="slab" style={{ fontSize: 28, marginTop: 6, lineHeight: 1 }}>{STATE_LABEL_RU[state]}</div>
+          <div className="mono" style={{ fontSize: 10, marginTop: 4, color: 'var(--ink-2)' }}>// {state}</div>
+          <div style={{ position: 'absolute', right: 14, bottom: 12 }}>
+            <Glyph shape={state === 'cash-risk' || state === 'savings-off-track' ? 'triangle' : (state === 'payday-arrived' ? 'circle' : 'square')} fill="var(--red)" size={24} />
+          </div>
+        </div>
+      </div>
+
+      {showDash && (
+        <section style={{ marginBottom: 56 }}>
+          <HeadBar n="F.1" title="Главный экран — три варианта" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 28, marginTop: 20, justifyItems: 'center' }}>
+            <Direction label="A · Плашка" tagline="Крупная плашка числа. Асимметрия: жёлтая ось слева, число справа."
+              pros={['один ответ', 'максимальная иерархия', 'быстрое сканирование']}
+              cons={['нет визуального контекста цикла']}>
+              <Phone label="A · ПЛАШКА" seed={11}><DashMassive state={state} /></Phone>
+            </Direction>
+            <Direction label="B · Клетки" tagline="Число + 11 клеток. Цикл виден целиком."
+              pros={['сразу виден цикл', 'маркеры обязательных', 'видны дни с малым запасом']}
+              cons={['плотнее', 'нужно научить читать']}>
+              <Phone label="B · КЛЕТКИ" seed={12}><DashBeads state={state} /></Phone>
+            </Direction>
+            <Direction label="C · Конверты" tagline="Две области: оперативный остаток и накопления. Разделение — явное."
+              pros={['накопления отделены', 'подушка показана', 'тактильно']}
+              cons={['больше места на элемент']}>
+              <Phone label="C · КОНВЕРТЫ" seed={13}><DashEnvelopes state={state} /></Phone>
+            </Direction>
+          </div>
+        </section>
+      )}
+
+      {showOther && (
+        <section>
+          <HeadBar n="F.2" title="Остальные четыре экрана" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginTop: 20, justifyItems: 'center' }}>
+            <Phone label="2 · ЦИКЛ" seed={14} w={280} h={560}><ScreenRunway /></Phone>
+            <Phone label="3 · НАКОПЛЕНИЯ" seed={15} w={280} h={560}><ScreenSavings state={state} /></Phone>
+            <Phone label="4 · ИСТОРИЯ" seed={16} w={280} h={560}><ScreenHistory /></Phone>
+            <Phone label="5 · НАСТРОЙКИ" seed={17} w={280} h={560}><ScreenSettings /></Phone>
+          </div>
+        </section>
+      )}
+
+      <div style={{ marginTop: 60, padding: 20, borderTop: '3px solid var(--ink)', maxWidth: 820, margin: '60px auto 0' }}>
+        <div className="slab" style={{ fontSize: 18, textTransform: 'uppercase' }}>Дальше</div>
+        <ul className="ui" style={{ fontSize: 14, lineHeight: 1.65, paddingLeft: 18, color: 'var(--ink-2)' }}>
+          <li>Выбрать направление главного экрана (A, B или C) — или гибрид.</li>
+          <li>Зафиксировать имя подушки в UI.</li>
+          <li>Решить: «если сегодня не трачу — завтра могу» остаётся на главном экране или открывается по тапу.</li>
+          <li>Закрепить онбординг: даты зарплаты, подушка, типичные суммы, база накоплений.</li>
+          <li>После выбора — переход к hi-fi с финальной типографикой и цветом.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function HeadBar({ n, title }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', alignItems: 'baseline', gap: 20, borderTop: '2px solid var(--ink)', paddingTop: 14 }}>
+      <div className="slab" style={{ fontSize: 48, color: 'var(--red)', lineHeight: 0.85 }}>{n}</div>
+      <div>
+        <div className="slab" style={{ fontSize: 28, textTransform: 'uppercase' }}>{title}</div>
+        <Rule color="var(--ink)" thick={3} style={{ marginTop: 6, width: 160 }} />
+      </div>
+    </div>
+  );
+}
+
+function Direction({ label, tagline, pros, cons, children }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, maxWidth: 340 }}>
+      {children}
+      <div style={{ textAlign: 'center' }}>
+        <H size={12} color="var(--muted)" style={{ fontStyle: 'italic', lineHeight: 1.4 }}>{tagline}</H>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontFamily: 'Kalam', fontSize: 11, alignSelf: 'stretch' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+            <Glyph shape="circle" fill="var(--blue)" size={9} />
+            <span className="slab" style={{ fontSize: 9, textTransform: 'uppercase' }}>Плюсы</span>
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 12 }}>{pros.map((p, i) => <li key={i}><H size={11}>{p}</H></li>)}</ul>
+        </div>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+            <Glyph shape="triangle" fill="var(--red)" size={9} />
+            <span className="slab" style={{ fontSize: 9, textTransform: 'uppercase' }}>Минусы</span>
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 12 }}>{cons.map((p, i) => <li key={i}><H size={11}>{p}</H></li>)}</ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Tweaks({ state, setState, focus, setFocus, onClose }) {
+  const states = Object.keys(STATE_LABEL_RU);
+  const focuses = [['all', 'все экраны'], ['dash', 'только главный'], ['other', 'без главного']];
+  return (
+    <div style={{ position: 'fixed', right: 20, bottom: 20, zIndex: 100, width: 280, background: 'var(--paper)', border: '2px solid var(--ink)', padding: 14, boxShadow: '6px 6px 0 var(--ink)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div className="slab" style={{ fontSize: 16, textTransform: 'uppercase' }}>Tweaks</div>
+        <div onClick={onClose} style={{ cursor: 'pointer', fontSize: 18, lineHeight: 1, fontFamily: 'Archivo Black' }}>×</div>
+      </div>
+
+      <div className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Состояние</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 12 }}>
+        {states.map(s => (
+          <div key={s} onClick={() => setState(s)} style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', cursor: 'pointer',
+            background: state === s ? 'var(--yellow)' : 'transparent',
+            border: state === s ? '1.5px solid var(--ink)' : '1.5px solid transparent',
+          }}>
+            <Check on={state === s} />
+            <H size={12}>{STATE_LABEL_RU[s]}</H>
+            <span style={{ flex: 1 }} />
+            <span className="mono" style={{ fontSize: 9, color: 'var(--muted)' }}>{s}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="slab" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Фокус</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {focuses.map(([k, label]) => (
+          <div key={k} onClick={() => setFocus(k)} style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', cursor: 'pointer',
+            background: focus === k ? 'rgba(7,73,169,0.12)' : 'transparent',
+            border: focus === k ? '1.5px solid var(--blue)' : '1.5px solid transparent',
+          }}>
+            <Check on={focus === k} />
+            <H size={12}>{label}</H>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<script>
+(function(){
+  function go(){ setTimeout(() => window.print(), 800); }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { setTimeout(go, 900); });
+  } else {
+    window.addEventListener('load', () => setTimeout(go, 1600));
+  }
+})();
+</script>
+</body>
+</html>
