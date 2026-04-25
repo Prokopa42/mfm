@@ -7,7 +7,7 @@ import { CycleScreen } from "@/components/screens/cycle-screen";
 import { SavingsScreen } from "@/components/screens/savings-screen";
 import { HistoryScreen } from "@/components/screens/history-screen";
 import { SettingsScreen } from "@/components/screens/settings-screen";
-import { Glyph, TabBar, type TabItem } from "@/components/mfm-ui";
+import { TabBar, type TabItem } from "@/components/mfm-ui";
 import { calculateSnapshot } from "@/lib/calculations";
 import { addDays, getFollowingPaycheckDate, getPaycheckSlotForDate, todayISO } from "@/lib/dates";
 import { createInitialState } from "@/lib/sample-data";
@@ -30,6 +30,8 @@ const TABS: TabItem[] = [
   { id: "history", label: "История", shape: "triangle" },
   { id: "settings", label: "Настройки", shape: "halfcircle" }
 ];
+
+const APP_FRAME_MAX = 430;
 
 export function AppShell() {
   const [financeState, setFinanceState, loaded] = useFinanceState();
@@ -284,82 +286,14 @@ export function AppShell() {
     )
   } satisfies Record<Tab, React.ReactNode>;
 
-  // Section meta for the top strip — index (1-based, zero-padded) + label.
-  const activeIndex = TABS.findIndex((t) => t.id === activeTab);
-  const sectionNo = String(activeIndex + 1).padStart(2, "0");
-  const sectionLabel = TABS[activeIndex]?.label ?? "";
-
   return (
     <div className="relative z-10 min-h-dvh" style={{ background: "var(--paper)" }}>
-      {/* ─── Top strip ────────────────────────────────────────────
-          Thin sticky chrome: brand mark on the left, current section
-          eyebrow chip mid-left, sync indicator on the right.
-          State signals (cash-risk / payday / off-track) NOT here —
-          they surface as <Banner> inside each screen per hi-fi.
-          ────────────────────────────────────────────────────────── */}
-      <header
-        className="sticky top-0 z-30"
-        style={{
-          background: "var(--paper)",
-          borderBottom: "0.5px solid var(--hair)"
-        }}
-      >
-        <div
-          className="mx-auto flex max-w-4xl items-baseline justify-between"
-          style={{ padding: "12px var(--pad-x) 10px", gap: 14 }}
-        >
-          <div className="flex min-w-0 items-baseline" style={{ gap: 14 }}>
-            <span
-              className="slab"
-              style={{
-                fontSize: 11,
-                letterSpacing: "0.2em",
-                textTransform: "uppercase",
-                color: "var(--ink)"
-              }}
-            >
-              МФМ
-            </span>
-            <div style={{ width: 28, height: 0.5, background: "var(--ink-55)" }} />
-            <span
-              className="slab"
-              style={{
-                fontSize: 9,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--ink)"
-              }}
-            >
-              {sectionNo}
-              <span style={{ color: "var(--ink-55)", margin: "0 6px" }}>·</span>
-              {sectionLabel}
-            </span>
-          </div>
-          <div className="flex items-center" style={{ gap: 6 }}>
-            <Glyph
-              shape="circle"
-              fill={loaded ? "var(--ink)" : "none"}
-              stroke={loaded ? null : "var(--ink-55)"}
-              size={8}
-              sw={1}
-            />
-            <span
-              className="slab"
-              style={{
-                fontSize: 8,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--ink-55)"
-              }}
-            >
-              {loaded ? "sync" : "load"}
-            </span>
-          </div>
-        </div>
-      </header>
-
       {/* ─── Main — no horizontal padding; screens own pad-x=18 ─── */}
-      <main className="screen-safe-bottom mx-auto max-w-4xl" style={{ minHeight: "calc(100dvh - 44px)" }}>
+      <main
+        className="screen-safe-bottom mx-auto"
+        style={{ minHeight: "100dvh", maxWidth: APP_FRAME_MAX }}
+        aria-busy={!loaded}
+      >
         {screen[activeTab]}
       </main>
 
@@ -368,7 +302,7 @@ export function AppShell() {
         className="fixed bottom-0 left-0 right-0 z-40"
         style={{ background: "var(--paper)" }}
       >
-        <div className="mx-auto max-w-4xl">
+        <div className="mx-auto" style={{ maxWidth: APP_FRAME_MAX }}>
           <TabBar
             items={TABS}
             activeId={activeTab}
