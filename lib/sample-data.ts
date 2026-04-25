@@ -22,7 +22,7 @@ export function createInitialState(today = todayISO()): FinanceState {
   const cycle = getCurrentCycleBounds(today, DEFAULT_SETTINGS);
   const previousPaycheck = getPreviousPaycheckDate(today, DEFAULT_SETTINGS);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operationalBalance: 15400,
     payCycle: {
       id: "cycle_current",
@@ -102,15 +102,20 @@ export function createInitialState(today = todayISO()): FinanceState {
     savings: {
       balance: 43100,
       openedAt: "2026-01-01",
-      baselineBalance: 36000
+      baselineBalance: 36000,
+      // Quiet-on-migration default: подушка не настроена (target=0).
+      // Полировка с реалистичными числами — этап 9 (Savings screen).
+      cushion: { allocated: 0, target: 0 }
     },
     transfersToSavings: [
+      // Без linkedGoalId — переводы идут в общий котёл, дальше пользователь
+      // распределяет по конвертам. linkedGoalId на удалённый goal_reserve
+      // оставлять нельзя — dangling reference.
       {
         id: "transfer_done",
         amount: 3000,
         date: addDays(today, -1),
         planned: false,
-        linkedGoalId: "goal_reserve",
         note: "В накопления"
       },
       {
@@ -118,32 +123,39 @@ export function createInitialState(today = todayISO()): FinanceState {
         amount: 2500,
         date: addDays(today, 3),
         planned: true,
-        linkedGoalId: "goal_reserve",
         note: "Плановый перевод"
       }
     ],
     withdrawalsFromSavings: [],
+    // В канонической модели подушка — это `savings.cushion` (отдельный
+    // системный резерв), не обычная цель. Дублировать её в `goals` нельзя:
+    // путаница и риск двойного счёта. Здесь — только реальные
+    // пользовательские цели. Если в будущем sample-data получит
+    // realistic cushion (allocated/target > 0), она появится в
+    // `savings.cushion` выше, а не здесь.
+    //
+    // Quiet-on-migration: цели стартуют unconfigured (allocated=0,
+    // plannedPace=0) → status "unconfigured" в snapshot, никакой ложной
+    // тревоги. Полировка с реалистичными значениями — отдельный шаг,
+    // когда появится UI для распределения котла (этап 11).
     goals: [
-      {
-        id: "goal_reserve",
-        title: "Подушка",
-        target: 60000,
-        deadline: "2026-08-31",
-        priority: 1
-      },
       {
         id: "goal_trip",
         title: "Отпуск",
         target: 120000,
         deadline: "2026-06-30",
-        priority: 2
+        priority: 1,
+        allocated: 0,
+        plannedPace: 0
       },
       {
         id: "goal_laptop",
         title: "Новый ноутбук",
         target: 180000,
         deadline: "2026-12-31",
-        priority: 3
+        priority: 2,
+        allocated: 0,
+        plannedPace: 0
       }
     ],
     settings: DEFAULT_SETTINGS

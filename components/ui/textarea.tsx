@@ -1,17 +1,33 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Textarea — multiline counterpart of Input. Hairline-only, paper bg,
+ * mono 11px, vertical resize.
+ */
 export type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement>;
 
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, ...props }, ref) => {
+  ({ className, style, ...props }, ref) => {
     return (
       <textarea
+        ref={ref}
         className={cn(
-          "flex min-h-20 w-full border-2 border-[var(--ink)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] outline-none transition placeholder:text-[var(--muted-ink)] focus:bg-white focus:ring-2 focus:ring-[var(--blue)] disabled:cursor-not-allowed disabled:opacity-50",
+          "mono w-full px-1 py-2 text-[11px] outline-none placeholder:text-[var(--ink-35)] disabled:opacity-50",
           className
         )}
-        ref={ref}
+        style={{
+          background: "transparent",
+          color: "var(--ink)",
+          borderTop: "none",
+          borderLeft: "none",
+          borderRight: "none",
+          borderBottom: "0.5px solid var(--ink-80)",
+          borderRadius: 0,
+          minHeight: 80,
+          resize: "vertical",
+          ...style
+        }}
         {...props}
       />
     );

@@ -1,29 +1,34 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, History, Home, PiggyBank, Settings, WalletCards } from "lucide-react";
 import { ActionDialogs, type ActionDialogKind, type ActionPayload } from "@/components/action-dialogs";
 import { TodayScreen } from "@/components/screens/today-screen";
 import { CycleScreen } from "@/components/screens/cycle-screen";
 import { SavingsScreen } from "@/components/screens/savings-screen";
 import { HistoryScreen } from "@/components/screens/history-screen";
 import { SettingsScreen } from "@/components/screens/settings-screen";
-import { Badge } from "@/components/ui/badge";
-import { calculateSnapshot, stateLabel } from "@/lib/calculations";
+import { Glyph, TabBar, type TabItem } from "@/components/mfm-ui";
+import { calculateSnapshot } from "@/lib/calculations";
 import { addDays, getFollowingPaycheckDate, getPaycheckSlotForDate, todayISO } from "@/lib/dates";
 import { createInitialState } from "@/lib/sample-data";
 import { clearFinanceState, useFinanceState } from "@/lib/storage";
 import type { FinanceState, MandatoryPayment, SavingsGoal } from "@/lib/types";
-import { cn, uid } from "@/lib/utils";
+import { uid } from "@/lib/utils";
 
 type Tab = "today" | "cycle" | "savings" | "history" | "settings";
 
-const tabs: Array<{ id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: "today", label: "Сегодня", icon: Home },
-  { id: "cycle", label: "Цикл", icon: CalendarDays },
-  { id: "savings", label: "Накопления", icon: PiggyBank },
-  { id: "history", label: "История", icon: History },
-  { id: "settings", label: "Настройки", icon: Settings }
+/**
+ * Tab definitions — single source for both bottom TabBar and the section
+ * label in the top header strip. Shape mapping mirrors hifi-primitives.jsx
+ * exactly: circle → Сегодня, bar → Цикл, square → Накоп., triangle →
+ * История, halfcircle → Настр.
+ */
+const TABS: TabItem[] = [
+  { id: "today", label: "Сегодня", shape: "circle" },
+  { id: "cycle", label: "Цикл", shape: "bar" },
+  { id: "savings", label: "Накопления", shape: "square" },
+  { id: "history", label: "История", shape: "triangle" },
+  { id: "settings", label: "Настройки", shape: "halfcircle" }
 ];
 
 export function AppShell() {
@@ -205,6 +210,9 @@ export function AppShell() {
         };
       }
 
+      // New goals start in "unconfigured" state — allocated and plannedPace
+      // both default to 0 until the user explicitly distributes the pot or
+      // sets a planned pace (managed in Savings screen, step 9).
       return {
         ...previous,
         goals: [
@@ -214,7 +222,9 @@ export function AppShell() {
             title: goal.title,
             target: goal.target,
             deadline: goal.deadline,
-            priority: goal.priority
+            priority: goal.priority,
+            allocated: goal.allocated ?? 0,
+            plannedPace: goal.plannedPace ?? 0
           }
         ]
       };
@@ -274,62 +284,96 @@ export function AppShell() {
     )
   } satisfies Record<Tab, React.ReactNode>;
 
+  // Section meta for the top strip — index (1-based, zero-padded) + label.
+  const activeIndex = TABS.findIndex((t) => t.id === activeTab);
+  const sectionNo = String(activeIndex + 1).padStart(2, "0");
+  const sectionLabel = TABS[activeIndex]?.label ?? "";
+
   return (
-    <div className="relative z-10 min-h-dvh bg-[var(--paper)]">
-      <header className="sticky top-0 z-30 border-b-2 border-[var(--ink)] bg-[var(--paper)]">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
-          <div className="grid h-10 w-10 grid-cols-2 border-2 border-[var(--ink)]">
-            <span className="bg-[var(--red)]" />
-            <span className="bg-[var(--yellow)]" />
-            <span className="bg-[var(--blue)]" />
-            <span className="bg-[var(--ink)]" />
+    <div className="relative z-10 min-h-dvh" style={{ background: "var(--paper)" }}>
+      {/* ─── Top strip ────────────────────────────────────────────
+          Thin sticky chrome: brand mark on the left, current section
+          eyebrow chip mid-left, sync indicator on the right.
+          State signals (cash-risk / payday / off-track) NOT here —
+          they surface as <Banner> inside each screen per hi-fi.
+          ────────────────────────────────────────────────────────── */}
+      <header
+        className="sticky top-0 z-30"
+        style={{
+          background: "var(--paper)",
+          borderBottom: "0.5px solid var(--hair)"
+        }}
+      >
+        <div
+          className="mx-auto flex max-w-4xl items-baseline justify-between"
+          style={{ padding: "12px var(--pad-x) 10px", gap: 14 }}
+        >
+          <div className="flex min-w-0 items-baseline" style={{ gap: 14 }}>
+            <span
+              className="slab"
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.2em",
+                textTransform: "uppercase",
+                color: "var(--ink)"
+              }}
+            >
+              МФМ
+            </span>
+            <div style={{ width: 28, height: 0.5, background: "var(--ink-55)" }} />
+            <span
+              className="slab"
+              style={{
+                fontSize: 9,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--ink)"
+              }}
+            >
+              {sectionNo}
+              <span style={{ color: "var(--ink-55)", margin: "0 6px" }}>·</span>
+              {sectionLabel}
+            </span>
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="slab text-xl uppercase leading-none">МФМ</div>
-            <div className="truncate text-xs text-[var(--muted-ink)]">Можно потратить сегодня</div>
+          <div className="flex items-center" style={{ gap: 6 }}>
+            <Glyph
+              shape="circle"
+              fill={loaded ? "var(--ink)" : "none"}
+              stroke={loaded ? null : "var(--ink-55)"}
+              size={8}
+              sw={1}
+            />
+            <span
+              className="slab"
+              style={{
+                fontSize: 8,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--ink-55)"
+              }}
+            >
+              {loaded ? "sync" : "load"}
+            </span>
           </div>
-          <Badge
-            variant={
-              snapshot.primaryState === "cash-risk" || snapshot.primaryState === "savings-off-track"
-                ? "red"
-                : snapshot.primaryState === "payday-arrived"
-                  ? "blue"
-                  : snapshot.primaryState === "normal"
-                    ? "outline"
-                    : "yellow"
-            }
-            className="hidden sm:inline-flex"
-          >
-            {stateLabel(snapshot.primaryState)}
-          </Badge>
-          <WalletCards className={cn("h-6 w-6", loaded ? "opacity-100" : "opacity-40")} />
         </div>
       </header>
 
-      <main className="screen-safe-bottom mx-auto min-h-[calc(100dvh-66px)] max-w-4xl px-4 py-4">
+      {/* ─── Main — no horizontal padding; screens own pad-x=18 ─── */}
+      <main className="screen-safe-bottom mx-auto max-w-4xl" style={{ minHeight: "calc(100dvh - 44px)" }}>
         {screen[activeTab]}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t-2 border-[var(--ink)] bg-[var(--paper)]">
-        <div className="mx-auto grid max-w-4xl grid-cols-5">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                className={cn(
-                  "tap-highlight flex min-h-16 flex-col items-center justify-center gap-1 border-r-2 border-[var(--ink)] px-1 text-[10px] font-black uppercase last:border-r-0",
-                  active ? "bg-[var(--ink)] text-[var(--paper)]" : "bg-[var(--paper)] text-[var(--ink)]"
-                )}
-                onClick={() => setActiveTab(tab.id)}
-                type="button"
-              >
-                <Icon className="h-5 w-5" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+      {/* ─── Bottom nav — TabBar primitive in fixed wrapper ─────── */}
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-40"
+        style={{ background: "var(--paper)" }}
+      >
+        <div className="mx-auto max-w-4xl">
+          <TabBar
+            items={TABS}
+            activeId={activeTab}
+            onSelect={(id) => setActiveTab(id as Tab)}
+          />
         </div>
       </nav>
 

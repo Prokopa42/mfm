@@ -2,49 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────
+   Hi-fi tokens — single source of truth for paper/ink/signal/type/lines.
+   Derived from design/final/МФМ (hifi-primitives, hifi-app, hifi-*).
+   Components and screens consume these via var(--*); no hard-coded values.
+   ───────────────────────────────────────────────────────────── */
 :root {
-  --background: 45 32% 93%;
-  --foreground: 0 0% 8%;
-  --card: 45 32% 93%;
-  --card-foreground: 0 0% 8%;
-  --primary: 0 0% 8%;
-  --primary-foreground: 45 32% 93%;
-  --secondary: 48 95% 67%;
-  --secondary-foreground: 0 0% 8%;
-  --muted: 45 20% 86%;
-  --muted-foreground: 0 0% 39%;
-  --accent: 215 92% 35%;
-  --accent-foreground: 45 32% 93%;
-  --destructive: 359 69% 51%;
-  --destructive-foreground: 45 32% 93%;
-  --border: 0 0% 8%;
-  --input: 0 0% 8%;
-  --ring: 215 92% 35%;
+  /* paper / ink hierarchy ------------------------------------------------ */
+  --paper:    #f6f1e3;
+  --ink:      #14120d;
+  --ink-80:   rgba(20, 18, 13, 0.80);
+  --ink-55:   rgba(20, 18, 13, 0.55);
+  --ink-35:   rgba(20, 18, 13, 0.35);
+  --ink-18:   rgba(20, 18, 13, 0.18);
+  --hair:     #d9d3bc;
+  --thin:     #ece7d2;     /* progress / segment track fill */
 
-  --paper: #f7f3ea;
-  --paper-2: #eee8dc;
-  --paper-3: #fbf8f0;
-  --ink: #141414;
-  --ink-2: #2a2a2a;
-  --muted-ink: #6b6b6b;
-  --thin: #d4d0c4;
-  --brand-red: #d63031;
-  --brand-blue: #0749a9;
-  --brand-yellow: #fbdd5b;
-  --red: #a6423f;
-  --blue: #2d5b8f;
-  --yellow: #c8ad42;
-  --red-soft: #f7ebe8;
-  --blue-soft: #edf3f8;
-  --yellow-soft: #f7f0d0;
-  --red-line: #bc4844;
-  --blue-line: #2f669b;
-  --yellow-line: #c5a12a;
-  --green: #1f7a4d;
+  /* signal accents — only as accent, never as full-area fill ------------- */
+  --yellow:    #eccc3a;
+  --yellow-bg: #f1dd7a;     /* hero axis cushion sliver only */
+  --blue:      #0e4fb0;
+  --red:       #c42a2a;
 
-  --font-ui: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
-  --font-slab: "Arial Black", "Arial Bold", Impact, sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  /* typography ----------------------------------------------------------
+     Three roles, three fonts:
+       --font-ui   : calm body sans, used by default for any text that does
+                     not opt into a specialised face. Native system stack —
+                     no extra loads.
+       --font-slab : Archivo Black, only for hero/strong headings (opt-in via .slab).
+       --font-mono : JetBrains Mono, only for numbers / meta / microcopy /
+                     tabular values (opt-in via .mono).
+     Body inherits --font-ui. Slab and mono are always explicit. */
+  --font-ui:   -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-slab: "Archivo Black", "Arial Black", Impact, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  /* number / type scale -------------------------------------------------- */
+  --t-hero:   64px;
+  --t-hero-x: 28px;          /* currency next to hero number */
+  --t-num-l:  18px;
+  --t-num-m:  15px;
+  --t-num-s:  11px;
+
+  /* line hierarchy — sacred. all rules pick from here. ------------------- */
+  --line-hair:   0.5px;       /* hair, ticks, intra-section dividers */
+  --line-reg:    1px;         /* section/screen frames */
+  --line-heavy:  1.5px;       /* today vertical, hero/separator */
+  --line-accent: 2px;         /* hero axis, row marker, active tab marker */
+
+  /* layout --------------------------------------------------------------- */
+  --pad-x: 18px;
 }
 
 * {
@@ -63,22 +70,10 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
-}
-
-body::before {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  content: "";
-  background-image:
-    radial-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
-    radial-gradient(rgba(0, 0, 0, 0.02) 1px, transparent 1px);
-  background-position: 0 0, 1px 2px;
-  background-size: 3px 3px, 7px 7px;
-  opacity: 0.5;
 }
 
 button,
@@ -97,6 +92,8 @@ button {
   color: var(--ink);
 }
 
+/* ─── Typography utility classes ───────────────────────────── */
+
 .slab {
   font-family: var(--font-slab);
   font-weight: 900;
@@ -107,8 +104,29 @@ button {
   font-family: var(--font-mono);
 }
 
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.eyebrow {
+  font-family: var(--font-slab);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-55);
+}
+
+.eyebrow--ink {
+  color: var(--ink);
+}
+
+/* ─── App-shell helpers (kept for layout continuity) ───────── */
+
 .screen-safe-bottom {
-  padding-bottom: calc(env(safe-area-inset-bottom) + 76px);
+  /* Reserve room for the fixed TabBar at the bottom of the shell.
+     New TabBar (~38px content) + 14px breathing = 52px. */
+  padding-bottom: calc(env(safe-area-inset-bottom) + 52px);
 }
 
 .tap-highlight {

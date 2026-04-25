@@ -1,27 +1,47 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Progress — 3px hairline track + ink (or accent) fill.
+ * Matches CushionBlock / GoalRow progress in hifi-savings.jsx:
+ *   {flex:1, height:3, background:'var(--thin)',
+ *    border:'0.5px solid var(--hair)', position:'relative'}
+ *   inner: {position:'absolute', left:0, top:-0.5, bottom:-0.5,
+ *           width:`${pct}%`, background:'var(--ink)|status-color'}
+ */
 interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
   value: number;
-  tone?: "ink" | "blue" | "red" | "yellow";
+  tone?: "ink" | "blue" | "red";
 }
 
-const toneClass = {
-  ink: "bg-[var(--ink)]",
-  blue: "bg-[var(--blue-line)]",
-  red: "bg-[var(--red-line)]",
-  yellow: "bg-[var(--yellow-line)]"
+const TONE: Record<NonNullable<ProgressProps["tone"]>, string> = {
+  ink: "var(--ink)",
+  blue: "var(--blue)",
+  red: "var(--red)"
 };
 
-function Progress({ className, value, tone = "ink", ...props }: ProgressProps) {
+function Progress({ className, value, tone = "ink", style, ...props }: ProgressProps) {
+  const pct = Math.max(0, Math.min(100, value));
   return (
     <div
-      className={cn("h-3 w-full overflow-hidden border-2 border-[var(--ink)] bg-[var(--paper-2)]", className)}
+      className={cn("relative w-full", className)}
+      style={{
+        height: 3,
+        background: "var(--thin)",
+        border: "0.5px solid var(--hair)",
+        ...style
+      }}
       {...props}
     >
       <div
-        className={cn("h-full transition-all", toneClass[tone])}
-        style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
+        style={{
+          position: "absolute",
+          left: 0,
+          top: -0.5,
+          bottom: -0.5,
+          width: `${pct}%`,
+          background: TONE[tone]
+        }}
       />
     </div>
   );

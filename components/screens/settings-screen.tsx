@@ -1,21 +1,24 @@
 "use client";
 
-import { useEffect, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
-import { RotateCcw } from "lucide-react";
-import { InfoHint, Panel, SectionTitle } from "@/components/mfm-ui";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  Glyph,
+  Group,
+  Row,
+  SegControl,
+  SettingsCTA,
+  StepControl
+} from "@/components/mfm-ui";
 import { Switch } from "@/components/ui/switch";
-import { todayISO } from "@/lib/dates";
 import type { CalculationSettings, FinanceState, MandatoryPayment } from "@/lib/types";
-import { formatMoney, numberFromInput } from "@/lib/utils";
 
 interface SettingsScreenProps {
   state: FinanceState;
   setState: Dispatch<SetStateAction<FinanceState>>;
-  onAddMandatoryPayment: (payment: Omit<MandatoryPayment, "id" | "status">) => void;
-  onReset: () => void;
+  // Kept in props for shell wiring parity. Mandatory-payment add UI lives in
+  // a future ActionDialog (step 11); reset is intentionally absent in hi-fi.
+  onAddMandatoryPayment?: (payment: Omit<MandatoryPayment, "id" | "status">) => void;
+  onReset?: () => void;
 }
 
 interface SettingsDraft {
@@ -24,431 +27,74 @@ interface SettingsDraft {
   savingsBalance: number;
 }
 
-export function SettingsScreen({
-  state,
-  setState,
-  onAddMandatoryPayment,
-  onReset
-}: SettingsScreenProps) {
-  const [draft, setDraft] = useState<SettingsDraft>(() => createSettingsDraft(state));
-  const [dirty, setDirty] = useState(false);
-  const hasChanges = !isSettingsDraftEqual(draft, state);
+/* ─────────────────────────────────────────────────────────────
+   Hi-fi 05/05 — Settings screen.
+   Direct port of design/final/МФМ/hifi-settings.jsx onto live state.
 
-  useEffect(() => {
-    if (!dirty) {
-      setDraft(createSettingsDraft(state));
-    }
-  }, [dirty, state]);
+   Staged editing — sacred:
+     1. user edits `draft` (local copy)
+     2. dirtyKeys = diff(applied=state, draft) drives row-level red dots
+        and the header status; nothing recalculates yet
+     3. "Применить" commits draft into the global state via setState
+        — single-step recalc downstream
+     4. "Отменить" reverts draft to applied (no commit)
+     5. While !dirty, external state changes (e.g. an expense recorded
+        on Today) re-sync the draft via useEffect.
+   ───────────────────────────────────────────────────────────── */
 
-  function updateDraft(updater: (previous: SettingsDraft) => SettingsDraft) {
-    setDirty(true);
-    setDraft(updater);
-  }
+// ─── DraftKey: discriminator for per-row dirty + N-edits header ──
+const DRAFT_KEYS = [
+  "payday1",
+  "typicalPaycheck1",
+  "payday2",
+  "typicalPaycheck2",
+  "reserveAmount",
+  "savingsBalance",
+  "operationalBalance",
+  "autoSubtractPlannedSavings",
+  "includeTodayInDivisor",
+  "rounding",
+  "purchasingPowerCoef"
+] as const;
 
-  function updateSettingsDraft(patch: Partial<CalculationSettings>) {
-    updateDraft((previous) => ({
-      ...previous,
-      settings: { ...previous.settings, ...patch }
-    }));
-  }
+type DraftKey = (typeof DRAFT_KEYS)[number];
 
-  function applyDraft() {
-    if (!hasChanges) return;
-    setState((previous) => {
-      const settings = { ...draft.settings };
-      return {
-        ...previous,
-        operationalBalance: draft.operationalBalance,
-        settings,
-        reserve: {
-          ...previous.reserve,
-          amount: settings.reserveAmount
-        },
-        savings: {
-          ...previous.savings,
-          balance: draft.savingsBalance
-        }
-      };
-    });
-    setDirty(false);
-  }
-
-  function cancelDraft() {
-    setDraft(createSettingsDraft(state));
-    setDirty(false);
-  }
-
-  function handleResetDemo() {
-    onReset();
-    setDirty(false);
-  }
-
-  function updateOperationalBalance(value: number) {
-    updateDraft((previous) => ({ ...previous, operationalBalance: value }));
-  }
-
-  function updateSavingsBalance(value: number) {
-    updateDraft((previous) => ({ ...previous, savingsBalance: Math.max(0, value) }));
-  }
-
-  function updateReserveAmount(value: number) {
-    updateSettingsDraft({ reserveAmount: Math.max(0, value) });
-  }
-
-  function updatePurchasingPowerCoef(value: number) {
-    updateSettingsDraft({ purchasingPowerCoef: Math.min(1, Math.max(0, value)) });
-  }
-
-  function updateRounding() {
-    updateSettingsDraft({ rounding: draft.settings.rounding === "day" ? "hour" : "day" });
-  }
-
-  function updatePayday1(value: number) {
-    updateSettingsDraft({ payday1: clampDay(value) });
-  }
-
-  function updatePayday2(value: number) {
-    updateSettingsDraft({ payday2: clampDay(value) });
-  }
-
-  function updatePaycheck1(value: number) {
-    updateSettingsDraft({ typicalPaycheck1: Math.max(0, value) });
-  }
-
-  function updatePaycheck2(value: number) {
-    updateSettingsDraft({ typicalPaycheck2: Math.max(0, value) });
-  }
-
-  function updateIncludeToday(checked: boolean) {
-    updateSettingsDraft({ includeTodayInDivisor: checked });
-  }
-
-  function updateAutoSubtractSavings(checked: boolean) {
-    updateSettingsDraft({ autoSubtractPlannedSavings: checked });
-  }
-
-  function handleApplyClick() {
-    applyDraft();
-  }
-
-  function handleCancelClick() {
-    cancelDraft();
-  }
-
-  function handleResetClick() {
-    handleResetDemo();
-  }
-
-  function paymentStatusLabel(status: MandatoryPayment["status"]) {
-    const labels: Record<MandatoryPayment["status"], string> = {
-      scheduled: "запланирован",
-      paid: "оплачен",
-      missed: "просрочен"
-    };
-
-    return labels[status];
-  }
-
-  function paymentRecurrenceLabel(recurrence: MandatoryPayment["recurrence"]) {
-    return recurrence === "monthly" ? "ежемесячно" : "разово";
-  }
-
-  function draftNotice() {
-    return hasChanges ? "Есть изменения. Расчёты обновятся после применения." : "Расчёты обновляются только после кнопки Применить.";
-  }
-
-  function applyDisabled() {
-    return !hasChanges;
-  }
-
-  function cancelDisabled() {
-    return !dirty && !hasChanges;
-  }
-
-  function getSettings() {
-    return draft.settings;
-  }
-
-  function getOperationalBalance() {
-    return draft.operationalBalance;
-  }
-
-  function getSavingsBalance() {
-    return draft.savingsBalance;
-  }
-
-  function handleMandatorySubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const title = String(form.get("title") || "Обязательный платёж");
-    const amount = numberFromInput(form.get("amount"));
-    const dueDate = String(form.get("dueDate") || todayISO());
-    if (amount <= 0) return;
-    onAddMandatoryPayment({
-      title,
-      amount,
-      dueDate,
-      recurrence: form.get("recurrence") === "once" ? "once" : "monthly"
-    });
-    event.currentTarget.reset();
-  }
-
-  const settings = getSettings();
-
-  return (
-    <div className="grid gap-4">
-      <SectionTitle title="Настройки" eyebrow="Даты, подушка и расчёт" />
-
-      <Panel className="grid gap-3 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
-        <div>
-          <div className="text-xs font-black uppercase text-[var(--muted-ink)]">Изменения настроек</div>
-          <div className="slab text-lg uppercase leading-none">{hasChanges ? "Нужно применить" : "Настройки применены"}</div>
-          <div className="mt-1 text-sm text-[var(--muted-ink)]">{draftNotice()}</div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" onClick={handleCancelClick} disabled={cancelDisabled()}>
-            Отменить
-          </Button>
-          <Button variant="default" onClick={handleApplyClick} disabled={applyDisabled()}>
-            Применить
-          </Button>
-        </div>
-      </Panel>
-
-      <Panel className="p-4">
-        <div className="mb-4">
-          <div className="text-xs font-black uppercase text-[var(--muted-ink)]">Даты зарплаты</div>
-          <h2 className="slab text-lg uppercase leading-none">2 даты зарплаты</h2>
-          <div className="mt-2 text-sm text-[var(--muted-ink)]">
-            Эти суммы используются для расчёта цикла и при подтверждении зарплаты.
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <NumberField
-            label="День 1-й зарплаты"
-            min={1}
-            max={31}
-            value={settings.payday1}
-            onChange={updatePayday1}
-          />
-          <NumberField
-            label="День 2-й зарплаты"
-            min={1}
-            max={31}
-            value={settings.payday2}
-            onChange={updatePayday2}
-          />
-          <NumberField
-            label="Сумма 1-й зарплаты"
-            value={settings.typicalPaycheck1}
-            onChange={updatePaycheck1}
-          />
-          <NumberField
-            label="Сумма 2-й зарплаты"
-            value={settings.typicalPaycheck2}
-            onChange={updatePaycheck2}
-          />
-        </div>
-      </Panel>
-
-      <Panel className="p-4">
-        <div className="mb-4">
-          <div className="text-xs font-black uppercase text-[var(--muted-ink)]">Деньги</div>
-          <h2 className="slab text-lg uppercase leading-none">Остатки и коэффициент</h2>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <NumberField
-            label="Оперативный остаток"
-            info="Деньги в текущем контуре: карта, наличные или счёт для жизни до зарплаты."
-            value={getOperationalBalance()}
-            onChange={(value) => updateOperationalBalance(value)}
-          />
-          <NumberField
-            label="Подушка"
-            info="Защитный запас внутри расчёта. Он вычитается из свободного остатка до зарплаты."
-            value={settings.reserveAmount}
-            onChange={updateReserveAmount}
-          />
-          <NumberField
-            label="Накопления"
-            info="Отдельный контур денег на цели и будущее. Это не подушка текущего цикла."
-            value={getSavingsBalance()}
-            onChange={updateSavingsBalance}
-          />
-          <NumberField
-            label="Коэффициент покупательной силы"
-            step="0.01"
-            min={0}
-            max={1}
-            value={settings.purchasingPowerCoef}
-            onChange={updatePurchasingPowerCoef}
-          />
-        </div>
-      </Panel>
-
-      <Panel className="p-4">
-        <div className="mb-4">
-          <div className="text-xs font-black uppercase text-[var(--muted-ink)]">Предпочтения расчёта</div>
-          <h2 className="slab text-lg uppercase leading-none">Формулы MVP</h2>
-        </div>
-        <div className="grid gap-3">
-          <SwitchRow
-            label="Учитывать сегодня в делителе"
-            description="Включено: remainingDays = max(1, nextPaycheckDate - today)."
-            checked={settings.includeTodayInDivisor}
-            onCheckedChange={updateIncludeToday}
-          />
-          <SwitchRow
-            label="Автовычитать плановые переводы"
-            description="Плановые переводы в накопления уменьшают доступно до зарплаты."
-            checked={settings.autoSubtractPlannedSavings}
-            onCheckedChange={updateAutoSubtractSavings}
-          />
-          <div className="grid gap-2 border-2 border-[var(--ink)] p-3 sm:grid-cols-[1fr_auto] sm:items-center">
-            <div>
-              <div className="text-sm font-black uppercase">Округление расчёта</div>
-              <div className="text-xs text-[var(--muted-ink)]">В MVP используется дневной расчёт.</div>
-            </div>
-            <Button
-              variant={settings.rounding === "day" ? "secondary" : "outline"}
-              onClick={updateRounding}
-            >
-              {settings.rounding === "day" ? "День" : "Час"}
-            </Button>
-          </div>
-        </div>
-      </Panel>
-
-      <Panel className="p-4">
-        <div className="mb-4">
-          <div className="text-xs font-black uppercase text-[var(--muted-ink)]">Обязательные платежи</div>
-          <h2 className="slab text-lg uppercase leading-none">Шаблоны</h2>
-        </div>
-        <form className="grid gap-3 border-2 border-[var(--ink)] p-3" onSubmit={handleMandatorySubmit}>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="grid gap-2">
-              <Label htmlFor="payment-title">Название</Label>
-              <Input id="payment-title" name="title" defaultValue="Обязательный платёж" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="payment-amount">Сумма</Label>
-              <Input id="payment-amount" name="amount" inputMode="decimal" required />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="payment-date">Дата</Label>
-              <Input id="payment-date" name="dueDate" type="date" defaultValue={todayISO()} required />
-            </div>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-            <div className="grid gap-2">
-              <Label htmlFor="payment-recurrence">Повтор</Label>
-              <select
-                id="payment-recurrence"
-                name="recurrence"
-                className="h-10 border-2 border-[var(--ink)] bg-[var(--paper)] px-3 text-sm"
-                defaultValue="monthly"
-              >
-                <option value="monthly">Ежемесячно</option>
-                <option value="once">Разово</option>
-              </select>
-            </div>
-            <Button type="submit" variant="secondary">
-              Добавить платёж
-            </Button>
-          </div>
-        </form>
-
-        <div className="mt-4 grid gap-2">
-          {state.mandatoryPayments.map((payment) => (
-            <div key={payment.id} className="grid grid-cols-[1fr_auto] gap-3 border-b-2 border-dashed border-[var(--thin)] py-2 last:border-b-0">
-              <div>
-                <div className="slab text-sm uppercase">{payment.title}</div>
-                <div className="text-xs text-[var(--muted-ink)]">
-                  {payment.dueDate} · {paymentStatusLabel(payment.status)} · {paymentRecurrenceLabel(payment.recurrence)}
-                </div>
-              </div>
-              <div className="slab text-sm uppercase">{formatMoney(payment.amount)} ₽</div>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel className="grid gap-3 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
-        <div>
-          <div className="text-xs font-black uppercase text-[var(--muted-ink)]">Данные</div>
-          <div className="text-sm text-[var(--muted-ink)]">
-            Всё хранится локально в браузере. Банковские интеграции не подключены.
-          </div>
-        </div>
-        <Button variant="danger" onClick={handleResetClick}>
-          <RotateCcw className="mr-2 h-4 w-4" />
-          Сбросить демо
-        </Button>
-      </Panel>
-    </div>
-  );
+function valuesByKey(draft: SettingsDraft) {
+  return {
+    payday1: draft.settings.payday1,
+    typicalPaycheck1: draft.settings.typicalPaycheck1,
+    payday2: draft.settings.payday2,
+    typicalPaycheck2: draft.settings.typicalPaycheck2,
+    reserveAmount: draft.settings.reserveAmount,
+    savingsBalance: draft.savingsBalance,
+    operationalBalance: draft.operationalBalance,
+    autoSubtractPlannedSavings: draft.settings.autoSubtractPlannedSavings,
+    includeTodayInDivisor: draft.settings.includeTodayInDivisor,
+    rounding: draft.settings.rounding,
+    purchasingPowerCoef: draft.settings.purchasingPowerCoef
+  };
 }
 
-function NumberField({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  step = "1",
-  info
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  min?: number;
-  max?: number;
-  step?: string;
-  info?: string;
-}) {
-  return (
-    <div className="grid gap-2">
-      <Label className="inline-flex items-center gap-1">
-        {label}
-        {info ? <InfoHint text={info} /> : null}
-      </Label>
-      <Input
-        type="number"
-        inputMode="decimal"
-        min={min}
-        max={max}
-        step={step}
-        value={Number.isFinite(value) ? value : 0}
-        onChange={(event) => onChange(Number(event.target.value || 0))}
-      />
-    </div>
-  );
+function appliedValuesByKey(state: FinanceState) {
+  return {
+    payday1: state.settings.payday1,
+    typicalPaycheck1: state.settings.typicalPaycheck1,
+    payday2: state.settings.payday2,
+    typicalPaycheck2: state.settings.typicalPaycheck2,
+    reserveAmount: state.settings.reserveAmount,
+    savingsBalance: state.savings.balance,
+    operationalBalance: state.operationalBalance,
+    autoSubtractPlannedSavings: state.settings.autoSubtractPlannedSavings,
+    includeTodayInDivisor: state.settings.includeTodayInDivisor,
+    rounding: state.settings.rounding,
+    purchasingPowerCoef: state.settings.purchasingPowerCoef
+  };
 }
 
-function SwitchRow({
-  label,
-  description,
-  checked,
-  onCheckedChange
-}: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onCheckedChange: (checked: boolean) => void;
-}) {
-  return (
-    <div className="grid gap-3 border-2 border-[var(--ink)] p-3 sm:grid-cols-[1fr_auto] sm:items-center">
-      <div>
-        <div className="text-sm font-black uppercase">{label}</div>
-        <div className="text-xs text-[var(--muted-ink)]">{description}</div>
-      </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
-    </div>
-  );
-}
-
-function clampDay(value: number) {
-  return Math.min(31, Math.max(1, Math.round(value || 1)));
+function computeDirtyKeys(draft: SettingsDraft, state: FinanceState): DraftKey[] {
+  const a = valuesByKey(draft);
+  const b = appliedValuesByKey(state);
+  return DRAFT_KEYS.filter((k) => a[k] !== b[k]);
 }
 
 function createSettingsDraft(state: FinanceState): SettingsDraft {
@@ -459,21 +105,312 @@ function createSettingsDraft(state: FinanceState): SettingsDraft {
   };
 }
 
-function isSettingsDraftEqual(draft: SettingsDraft, state: FinanceState) {
-  const settings = draft.settings;
-  const current = state.settings;
+function clampDay(value: number) {
+  return Math.min(31, Math.max(1, Math.round(value || 1)));
+}
+
+// ─── Header ─────────────────────────────────────────────
+function SettingsHeader({ dirtyCount }: { dirtyCount: number }) {
+  return (
+    <div
+      style={{
+        padding: "12px var(--pad-x) 10px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        borderBottom: "0.5px solid var(--hair)"
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span
+          className="slab"
+          style={{ fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase" }}
+        >
+          Настройки
+        </span>
+        <div style={{ width: 14, height: 0.5, background: "var(--ink-55)" }} />
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-55)" }}>
+          {dirtyCount > 0 ? `черновик · ${dirtyCount} правок` : "без изменений"}
+        </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <div
+          style={{
+            width: 4,
+            height: 4,
+            background: dirtyCount > 0 ? "var(--red)" : "var(--ink-35)"
+          }}
+        />
+        <span
+          className="mono"
+          style={{
+            fontSize: 9,
+            color: "var(--ink-55)",
+            letterSpacing: "0.06em",
+            textTransform: "uppercase"
+          }}
+        >
+          {dirtyCount > 0 ? "не применено" : "синхронизировано"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Staged-edit banner ─────────────────────────────────
+// Dedicated layout (3px accent left + glyph cell + body) — visually a
+// twin of mfm-ui::Banner but neutral when no edits, red when dirty.
+// Banner primitive doesn't expose neutral kind, so we keep this local.
+function StagedBanner({ dirtyCount }: { dirtyCount: number }) {
+  return (
+    <div
+      style={{
+        margin: "10px var(--pad-x) 0",
+        border: "0.5px solid var(--ink-80)",
+        display: "grid",
+        gridTemplateColumns: "3px auto 1fr",
+        alignItems: "stretch"
+      }}
+    >
+      <div style={{ background: dirtyCount > 0 ? "var(--red)" : "var(--ink-35)" }} />
+      <div style={{ padding: "0 8px", display: "flex", alignItems: "center" }}>
+        <Glyph shape="circle" fill="none" stroke="var(--ink)" size={8} sw={1} />
+      </div>
+      <div style={{ padding: "7px 10px 7px 0" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <span
+            className="slab"
+            style={{ fontSize: 9.5, letterSpacing: "0.06em", textTransform: "uppercase" }}
+          >
+            Правки вносятся в черновик
+          </span>
+        </div>
+        <div
+          className="mono"
+          style={{
+            fontSize: 9.5,
+            color: "var(--ink-55)",
+            marginTop: 2,
+            lineHeight: 1.4
+          }}
+        >
+          Сначала вы редактируете значения, затем нажимаете «Применить» — пересчёт произойдёт одним шагом.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen ─────────────────────────────────────────────
+export function SettingsScreen({ state, setState }: SettingsScreenProps) {
+  // applied = state (external), draft = local copy of editable fields
+  const [draft, setDraft] = useState<SettingsDraft>(() => createSettingsDraft(state));
+  // `dirty` is a sticky "user has touched the form" flag; while it's false,
+  // external state changes (e.g. a new expense on Today) re-sync the draft.
+  const [dirty, setDirty] = useState(false);
+
+  const dirtyKeys = computeDirtyKeys(draft, state);
+  const hasChanges = dirtyKeys.length > 0;
+  const isDirty = (k: DraftKey) => dirtyKeys.includes(k);
+
+  useEffect(() => {
+    if (!dirty) {
+      setDraft(createSettingsDraft(state));
+    }
+  }, [dirty, state]);
+
+  function patch(updater: (prev: SettingsDraft) => SettingsDraft) {
+    setDirty(true);
+    setDraft(updater);
+  }
+
+  function patchSettings(p: Partial<CalculationSettings>) {
+    patch((prev) => ({ ...prev, settings: { ...prev.settings, ...p } }));
+  }
+
+  function applyDraft() {
+    if (!hasChanges) return;
+    setState((previous) => ({
+      ...previous,
+      operationalBalance: draft.operationalBalance,
+      settings: { ...draft.settings },
+      reserve: { ...previous.reserve, amount: draft.settings.reserveAmount },
+      savings: { ...previous.savings, balance: draft.savingsBalance }
+    }));
+    setDirty(false);
+  }
+
+  function cancelDraft() {
+    setDraft(createSettingsDraft(state));
+    setDirty(false);
+  }
+
+  const s = draft.settings;
 
   return (
-    draft.operationalBalance === state.operationalBalance &&
-    draft.savingsBalance === state.savings.balance &&
-    settings.payday1 === current.payday1 &&
-    settings.payday2 === current.payday2 &&
-    settings.typicalPaycheck1 === current.typicalPaycheck1 &&
-    settings.typicalPaycheck2 === current.typicalPaycheck2 &&
-    settings.reserveAmount === current.reserveAmount &&
-    settings.purchasingPowerCoef === current.purchasingPowerCoef &&
-    settings.rounding === current.rounding &&
-    settings.includeTodayInDivisor === current.includeTodayInDivisor &&
-    settings.autoSubtractPlannedSavings === current.autoSubtractPlannedSavings
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minHeight: "100%",
+        background: "var(--paper)"
+      }}
+    >
+      <SettingsHeader dirtyCount={dirtyKeys.length} />
+      <StagedBanner dirtyCount={dirtyKeys.length} />
+
+      {/* ─── Group 1: Цикл зарплаты ─────────────────────── */}
+      <Group title="Цикл зарплаты" note="cycle">
+        <Row label="День 1-й зарплаты" hint="число месяца" dirty={isDirty("payday1")}>
+          <StepControl
+            value={s.payday1}
+            onChange={(v) => patchSettings({ payday1: clampDay(v) })}
+            min={1}
+            max={31}
+            step={1}
+          />
+        </Row>
+        <Row
+          label="Сумма 1-й зарплаты"
+          hint="₽ за выплату"
+          dirty={isDirty("typicalPaycheck1")}
+        >
+          <StepControl
+            value={s.typicalPaycheck1}
+            onChange={(v) => patchSettings({ typicalPaycheck1: Math.max(0, v) })}
+            min={0}
+            max={1_000_000}
+            step={1000}
+            suffix=" ₽"
+          />
+        </Row>
+        <Row label="День 2-й зарплаты" hint="число месяца" dirty={isDirty("payday2")}>
+          <StepControl
+            value={s.payday2}
+            onChange={(v) => patchSettings({ payday2: clampDay(v) })}
+            min={1}
+            max={31}
+            step={1}
+          />
+        </Row>
+        <Row
+          label="Сумма 2-й зарплаты"
+          hint="₽ за выплату"
+          dirty={isDirty("typicalPaycheck2")}
+        >
+          <StepControl
+            value={s.typicalPaycheck2}
+            onChange={(v) => patchSettings({ typicalPaycheck2: Math.max(0, v) })}
+            min={0}
+            max={1_000_000}
+            step={1000}
+            suffix=" ₽"
+          />
+        </Row>
+      </Group>
+
+      {/* ─── Group 2: Подушка ───────────────────────────── */}
+      <Group title="Подушка" note="system reserve">
+        <Row
+          label="Размер подушки"
+          hint="вычитается из свободного остатка"
+          dirty={isDirty("reserveAmount")}
+        >
+          <StepControl
+            value={s.reserveAmount}
+            onChange={(v) => patchSettings({ reserveAmount: Math.max(0, v) })}
+            min={0}
+            max={1_000_000}
+            step={1000}
+            suffix=" ₽"
+          />
+        </Row>
+      </Group>
+
+      {/* ─── Group 3: Накопления ────────────────────────── */}
+      <Group title="Накопления" note="balances">
+        <Row
+          label="Текущие накопления"
+          hint="ручная корректировка котла"
+          dirty={isDirty("savingsBalance")}
+        >
+          <StepControl
+            value={draft.savingsBalance}
+            onChange={(v) => patch((p) => ({ ...p, savingsBalance: Math.max(0, v) }))}
+            min={0}
+            max={10_000_000}
+            step={1000}
+            suffix=" ₽"
+          />
+        </Row>
+        <Row
+          label="Оперативный остаток"
+          hint="ручная корректировка текущего контура"
+          dirty={isDirty("operationalBalance")}
+        >
+          <StepControl
+            value={draft.operationalBalance}
+            onChange={(v) => patch((p) => ({ ...p, operationalBalance: Math.max(0, v) }))}
+            min={0}
+            max={10_000_000}
+            step={1000}
+            suffix=" ₽"
+          />
+        </Row>
+        <Row
+          label="Автовычитать плановые переводы"
+          hint="из «доступно до зарплаты»"
+          dirty={isDirty("autoSubtractPlannedSavings")}
+        >
+          <Switch
+            checked={s.autoSubtractPlannedSavings}
+            onCheckedChange={(v) => patchSettings({ autoSubtractPlannedSavings: v })}
+          />
+        </Row>
+      </Group>
+
+      {/* ─── Group 4: Расчёт ────────────────────────────── */}
+      <Group title="Расчёт" note="calculation">
+        <Row
+          label="Учитывать сегодня в делителе"
+          hint="как считается «можно сегодня»"
+          dirty={isDirty("includeTodayInDivisor")}
+        >
+          <Switch
+            checked={s.includeTodayInDivisor}
+            onCheckedChange={(v) => patchSettings({ includeTodayInDivisor: v })}
+          />
+        </Row>
+        <Row label="Округление" hint="шаг расчёта" dirty={isDirty("rounding")}>
+          <SegControl
+            value={s.rounding}
+            onChange={(v) => patchSettings({ rounding: v })}
+            options={[
+              { id: "day", label: "день" },
+              { id: "hour", label: "час" }
+            ]}
+          />
+        </Row>
+        <Row
+          label="Коэф. покупательной силы"
+          hint="0…1, для прогнозов в сегодняшних ₽"
+          dirty={isDirty("purchasingPowerCoef")}
+        >
+          <StepControl
+            value={Number(s.purchasingPowerCoef.toFixed(2))}
+            onChange={(v) =>
+              patchSettings({ purchasingPowerCoef: Math.min(1, Math.max(0, Number(v.toFixed(2)))) })
+            }
+            min={0}
+            max={1}
+            step={0.01}
+          />
+        </Row>
+      </Group>
+
+      <div style={{ flex: 1, minHeight: 14 }} />
+
+      <SettingsCTA dirty={hasChanges} onApply={applyDraft} onDiscard={cancelDraft} />
+    </div>
   );
 }

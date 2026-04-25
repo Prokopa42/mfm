@@ -12,7 +12,10 @@ import {
 } from "@/lib/dates";
 import type {
   CalculationSnapshot,
+  CushionSnapshot,
+  CushionStatus,
   FinanceState,
+  GoalStatus,
   HistoryItem,
   InterfaceState,
   ISODate,
@@ -72,8 +75,16 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
   const goals = state.goals
     .slice()
     .sort((a, b) => a.priority - b.priority)
-    .map((goal) => calculateGoalSnapshot(goal, state.savings.balance, monthlySavingPace, today));
-  const primaryGoal = goals[0];
+    .map((goal) => calculateGoalSnapshot(goal, today));
+
+  // primaryGoal selection — only goals the user has actually started managing
+  // (done/on-track/behind). "unconfigured" goals NEVER become primary, so
+  // Today PaceRow doesn't bind hero metrics to a not-yet-configured envelope.
+  const eligibleGoals = goals.filter(
+    (g) => g.status === "done" || g.status === "on-track" || g.status === "behind"
+  );
+  const primaryGoal: SavingsGoalSnapshot | undefined = eligibleGoals[0];
+
   const targetDate = primaryGoal?.goal.deadline ?? addDays(today, 365);
   const monthsUntilPrimaryTarget = Math.max(0, monthsBetween(today, targetDate));
   const yearsUntilPrimaryTarget = Math.max(0, daysBetween(today, targetDate) / 365);
@@ -95,8 +106,36 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     safeToSpendToday,
     isPaydayToday: isSameDate(firstNextPaycheckDate, today) && !isSameDate(state.payCycle.startDate, today),
     hasPaymentTomorrow: relevantMandatory.some((payment) => isSameDate(payment.dueDate, tomorrow)),
-    hasOffTrackGoal: goals.some((goal) => Boolean(goal.goal.deadline) && goal.status === "off-track")
+    hasOffTrackGoal: goals.some((goal) => Boolean(goal.goal.deadline) && goal.status === "behind")
   });
+
+  // ─── v2 savings-pot allocation ──────────────────────────────────
+  // Invariant: cushion.allocated + sum(goals.allocated) + unallocated = totalSavings
+  const totalSavings = state.savings.balance;
+  const cushionAllocated = state.savings.cushion.allocated;
+  const cushionTarget = state.savings.cushion.target;
+  const goalsAllocatedSum = state.goals.reduce((sum, g) => sum + g.allocated, 0);
+  const totalAllocated = cushionAllocated + goalsAllocatedSum;
+  const unallocatedSavings = totalSavings - totalAllocated;
+
+  const cushionProgress = cushionTarget > 0
+    ? Math.max(0, Math.min(1, cushionAllocated / cushionTarget))
+    : 0;
+
+  // Quiet-on-migration: target = 0 → "unset" (not configured), not alarming.
+  // Critical/low/ok only when user has set a target.
+  const cushionStatus: CushionStatus =
+    cushionTarget <= 0                        ? "unset" :
+    cushionAllocated >= cushionTarget         ? "ok" :
+    cushionAllocated < cushionTarget / 2      ? "critical" :
+                                                "low";
+
+  const cushion: CushionSnapshot = {
+    allocated: cushionAllocated,
+    target: cushionTarget,
+    progress: cushionProgress,
+    status: cushionStatus
+  };
 
   return {
     today,
@@ -120,47 +159,55 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     nextMandatoryPayment: upcomingMandatoryPayments[0],
     overdueMandatoryPayments,
     uiStates,
-    primaryState: uiStates[0]
+    primaryState: uiStates[0],
+    totalSavings,
+    totalAllocated,
+    unallocatedSavings,
+    cushion
   };
 }
 
+/**
+ * Per-goal envelope snapshot — strictly within this goal's allocation,
+ * NOT against the total pot. Each goal is independent.
+ *
+ * Quiet-on-migration: цель без выраженного намерения (allocated = 0 AND
+ * plannedPace = 0) получает status = "unconfigured" — нейтрально, не
+ * тревожит UI. Status переходит в done/on-track/behind только когда
+ * пользователь начал её "вести".
+ */
 export function calculateGoalSnapshot(
   goal: SavingsGoal,
-  currentSavings: number,
-  monthlySavingPace: number,
   today: ISODate
 ): SavingsGoalSnapshot {
-  const gap = Math.max(0, goal.target - currentSavings);
-  const overdue = Boolean(goal.deadline && compareDates(goal.deadline, today) < 0);
-  const monthsUntilDeadline = goal.deadline ? Math.max(0, monthsBetween(today, goal.deadline)) : null;
-  const horizonMonths = monthsUntilDeadline ?? 12;
-  const actualPace = monthlySavingPace;
-  const requiredPace = gap === 0 ? 0 : horizonMonths > 0 ? gap / horizonMonths : Number.POSITIVE_INFINITY;
-  const forecastAtDeadline = currentSavings + actualPace * horizonMonths;
-  const projectedGap = Math.max(0, goal.target - forecastAtDeadline);
-  const monthsToGoal =
-    gap === 0 ? 0 : monthlySavingPace > 0 ? gap / monthlySavingPace : null;
-  const status =
-    currentSavings >= goal.target
-      ? "reached"
-      : !goal.deadline || forecastAtDeadline >= goal.target
-        ? "on-track"
-        : "off-track";
-  const onTrack = status !== "off-track";
+  const allocatedNow = goal.allocated;
+  const plannedPace = goal.plannedPace;
+  const monthsLeft = goal.deadline ? Math.max(0, monthsBetween(today, goal.deadline)) : null;
+  const gapNow = Math.max(0, goal.target - allocatedNow);
+  const requiredPace =
+    gapNow === 0 ? 0 :
+    monthsLeft !== null && monthsLeft > 0 ? gapNow / monthsLeft :
+    Number.POSITIVE_INFINITY;
+  const horizon = monthsLeft ?? 12;
+  const forecastAtDeadline = allocatedNow + plannedPace * horizon;
+  const gapAtDeadline = Math.max(0, goal.target - forecastAtDeadline);
+
+  const intentExpressed = allocatedNow > 0 || plannedPace > 0;
+  const status: GoalStatus =
+    allocatedNow >= goal.target ? "done" :
+    !intentExpressed             ? "unconfigured" :
+    forecastAtDeadline >= goal.target ? "on-track" : "behind";
 
   return {
     goal,
-    gap,
-    monthsUntilDeadline,
-    horizonMonths,
-    monthsToGoal,
-    actualPace,
+    allocatedNow,
+    gapNow,
+    monthsLeft,
     requiredPace,
+    plannedPace,
     forecastAtDeadline,
-    projectedGap,
-    status,
-    onTrack,
-    overdue
+    gapAtDeadline,
+    status
   };
 }
 

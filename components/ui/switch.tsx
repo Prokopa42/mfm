@@ -1,28 +1,66 @@
 "use client";
 
 import * as React from "react";
-import * as SwitchPrimitives from "@radix-ui/react-switch";
 import { cn } from "@/lib/utils";
 
-const Switch = React.forwardRef<
-  React.ElementRef<typeof SwitchPrimitives.Root>,
-  React.ComponentPropsWithoutRef<typeof SwitchPrimitives.Root>
->(({ className, ...props }, ref) => (
-  <SwitchPrimitives.Root
-    className={cn(
-      "peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center border-2 border-[var(--ink)] bg-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue)] disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-[var(--ink)]",
-      className
-    )}
-    {...props}
-    ref={ref}
-  >
-    <SwitchPrimitives.Thumb
-      className={cn(
-        "pointer-events-none block h-4 w-4 bg-[var(--ink)] transition-transform data-[state=checked]:translate-x-5 data-[state=checked]:bg-[var(--yellow)] data-[state=unchecked]:translate-x-0.5"
-      )}
-    />
-  </SwitchPrimitives.Root>
-));
-Switch.displayName = SwitchPrimitives.Root.displayName;
+/**
+ * Switch — controlled toggle. Direct port of `Toggle` in
+ * design/final/МФМ/hifi-settings.jsx (28×14 outer, 10×10 thumb,
+ * ink-on / paper-thumb on, transparent-bg / ink-thumb off).
+ *
+ * API kept Radix-style (`checked` / `onCheckedChange`) so the existing
+ * settings-screen consumption keeps type-checking until step 7.
+ * Drops the @radix-ui/react-switch dependency in favour of a plain
+ * native button — no portals or focus traps needed.
+ */
+interface SwitchProps {
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+  disabled?: boolean;
+  className?: string;
+  "aria-label"?: string;
+}
+
+const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
+  (
+    { checked, onCheckedChange, disabled = false, className, "aria-label": ariaLabel },
+    ref
+  ) => {
+    return (
+      <button
+        ref={ref}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={ariaLabel}
+        disabled={disabled}
+        onClick={() => !disabled && onCheckedChange(!checked)}
+        className={cn("relative", className)}
+        style={{
+          width: 28,
+          height: 14,
+          padding: 0,
+          background: checked ? "var(--ink)" : "transparent",
+          border: "0.5px solid var(--ink-80)",
+          cursor: disabled ? "default" : "pointer",
+          opacity: disabled ? 0.5 : 1
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: 1.5,
+            left: checked ? 14 : 1.5,
+            width: 10,
+            height: 10,
+            background: checked ? "var(--paper)" : "var(--ink)",
+            transition: "left .1s"
+          }}
+        />
+      </button>
+    );
+  }
+);
+Switch.displayName = "Switch";
 
 export { Switch };

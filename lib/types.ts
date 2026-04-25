@@ -14,6 +14,25 @@ export type InterfaceState =
   | "payment-due-tomorrow"
   | "savings-off-track";
 
+/**
+ * Goal status in the savings model.
+ *   - "unconfigured": user hasn't set allocation OR planned pace yet —
+ *     neutral, NOT alarming. Quiet-on-migration default.
+ *   - "done": allocatedNow >= target.
+ *   - "on-track": forecastAtDeadline >= target (with intent expressed).
+ *   - "behind": forecastAtDeadline < target (with intent expressed).
+ */
+export type GoalStatus = "unconfigured" | "done" | "on-track" | "behind";
+
+/**
+ * Cushion status in the savings model.
+ *   - "unset": cushion.target = 0 — not configured by user, NOT alarming.
+ *   - "ok": allocated >= target.
+ *   - "low": allocated >= target/2 (and target > 0).
+ *   - "critical": allocated < target/2 (and target > 0).
+ */
+export type CushionStatus = "unset" | "ok" | "low" | "critical";
+
 export interface PayCycle {
   id: string;
   startDate: ISODate;
@@ -48,15 +67,43 @@ export interface VariableExpense {
   note?: string;
 }
 
+/**
+ * Reserve — CYCLE-LEVEL подушка.
+ *
+ * `amount` вычитается из `availableUntilNextPaycheck` в `calculateSnapshot`,
+ * показывается на Today (BalanceStrip "подушка" + FooterStrips "Подушка").
+ * Защищает текущий цикл — это про дневной лимит.
+ *
+ * НЕ ПУТАТЬ с `Savings.cushion`, который живёт внутри savings.balance и
+ * представляет долгосрочный системный резерв накоплений. Это две разные
+ * сущности с разной аудиторией и разной семантикой; код их не
+ * отождествляет.
+ */
 export interface Reserve {
   amount: number;
   policy: ReservePolicy;
+}
+
+/**
+ * Cushion — SYSTEM-LEVEL резерв ВНУТРИ котла накоплений.
+ *
+ * `allocated` — часть `Savings.balance`, помеченная как "не трогать".
+ * `target` — целевой размер; `target = 0` означает "пользователь ещё не
+ * настроил подушку" (нейтральное состояние, в UI трактуется как "unset",
+ * не тревога).
+ *
+ * НЕ ПУТАТЬ с `Reserve.amount` (cycle-level). См. JSDoc у Reserve.
+ */
+export interface Cushion {
+  allocated: number;
+  target: number;
 }
 
 export interface Savings {
   balance: number;
   openedAt: ISODate;
   baselineBalance: number;
+  cushion: Cushion;
 }
 
 export interface TransferToSavings {
@@ -75,12 +122,25 @@ export interface WithdrawalFromSavings {
   reason?: string;
 }
 
+/**
+ * SavingsGoal — конверт внутри котла накоплений.
+ *
+ * `allocated` — сколько из `Savings.balance` выделено в эту цель.
+ * `plannedPace` — сколько ₽/мес пользователь планирует откладывать в эту
+ * цель (формирует forecastAtDeadline и status).
+ *
+ * Если `allocated = 0` И `plannedPace = 0` — пользователь ещё не выразил
+ * намерение по этой цели; снапшот пометит status = "unconfigured" и она
+ * НЕ попадёт ни в primaryGoal, ни в "savings-off-track" UI signal.
+ */
 export interface SavingsGoal {
   id: string;
   title: string;
   target: number;
   deadline?: ISODate;
   priority: number;
+  allocated: number;
+  plannedPace: number;
 }
 
 export interface CalculationSettings {
@@ -96,7 +156,7 @@ export interface CalculationSettings {
 }
 
 export interface FinanceState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   operationalBalance: number;
   payCycle: PayCycle;
   incomes: Income[];
@@ -110,19 +170,33 @@ export interface FinanceState {
   settings: CalculationSettings;
 }
 
+/**
+ * Per-goal envelope snapshot. Calculated strictly within the goal's own
+ * envelope (allocatedNow + plannedPace * monthsLeft) — NOT against the
+ * total pot. Each goal is independent.
+ */
 export interface SavingsGoalSnapshot {
   goal: SavingsGoal;
-  gap: number;
-  monthsUntilDeadline: number | null;
-  horizonMonths: number;
-  monthsToGoal: number | null;
-  actualPace: number;
-  requiredPace: number;
-  forecastAtDeadline: number;
-  projectedGap: number;
-  status: "reached" | "on-track" | "off-track";
-  onTrack: boolean;
-  overdue: boolean;
+  allocatedNow: number;
+  gapNow: number;                // max(0, target - allocatedNow)
+  monthsLeft: number | null;     // monthsBetween(today, deadline); null если deadline отсутствует
+  requiredPace: number;          // gapNow / monthsLeft (Number.POSITIVE_INFINITY если monthsLeft = 0)
+  plannedPace: number;           // copy of goal.plannedPace
+  forecastAtDeadline: number;    // allocatedNow + plannedPace * (monthsLeft ?? 12)
+  gapAtDeadline: number;         // max(0, target - forecastAtDeadline)
+  status: GoalStatus;
+}
+
+/**
+ * System-cushion snapshot. Computed strictly from `Savings.cushion`
+ * (allocated/target). `target = 0` → status "unset" (not configured),
+ * not alarming.
+ */
+export interface CushionSnapshot {
+  allocated: number;
+  target: number;
+  progress: number;          // allocated / target, clamped [0, 1]; 0 если target = 0
+  status: CushionStatus;
 }
 
 export interface CalculationSnapshot {
@@ -141,13 +215,29 @@ export interface CalculationSnapshot {
   savingsForecastNominal: number;
   savingsForecastReal: number;
   yearsUntilPrimaryTarget: number;
+  /** Selected only among eligible goals (done / on-track / behind).
+   *  `unconfigured`-цели не становятся primary, чтобы Today PaceRow не
+   *  привязывался к ещё не настроенной цели. Если eligible пуст,
+   *  primaryGoal = undefined и UI фолбэчит на pot-level метрики. */
   primaryGoal?: SavingsGoalSnapshot;
+  /** Все цели (включая unconfigured). Savings screen рендерит их группами
+   *  по статусу. */
   goals: SavingsGoalSnapshot[];
   upcomingMandatoryPayments: MandatoryPayment[];
   nextMandatoryPayment?: MandatoryPayment;
   overdueMandatoryPayments: MandatoryPayment[];
   uiStates: InterfaceState[];
   primaryState: InterfaceState;
+
+  // ─── v2 savings-pot fields ────────────────────────────────────────
+  /** = state.savings.balance (общий котёл) */
+  totalSavings: number;
+  /** = cushion.allocated + sum(goals.allocated) */
+  totalAllocated: number;
+  /** = totalSavings - totalAllocated. Может быть < 0, если пользователь
+   *  переаллоцировал (Savings screen покажет это явно). */
+  unallocatedSavings: number;
+  cushion: CushionSnapshot;
 }
 
 export type HistoryItemKind =
