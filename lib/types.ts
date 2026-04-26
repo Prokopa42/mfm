@@ -1,10 +1,25 @@
 export type ISODate = string;
 
-export type IncomeKind = "paycheck" | "other";
+export type IncomeKind = "paycheck" | "bonus" | "other";
 export type MandatoryPaymentRecurrence = "monthly" | "once";
 export type MandatoryPaymentStatus = "scheduled" | "paid" | "missed";
 export type ReservePolicy = "flat" | "perCycle";
 export type CalculationRounding = "day" | "hour";
+export type ExpensePaymentSource = "own" | "credit";
+export type RubricScope =
+  | "expense"
+  | "income"
+  | "transfer"
+  | "withdraw"
+  | "mandatory-payment";
+
+export interface Rubric {
+  id: string;
+  title: string;
+  scope: RubricScope;
+  order: number;
+  isArchived: boolean;
+}
 
 export type InterfaceState =
   | "normal"
@@ -47,6 +62,8 @@ export interface Income {
   expectedDate: ISODate;
   receivedDate?: ISODate;
   kind: IncomeKind;
+  categoryId?: string;
+  title?: string;
   note?: string;
 }
 
@@ -57,13 +74,43 @@ export interface MandatoryPayment {
   dueDate: ISODate;
   recurrence: MandatoryPaymentRecurrence;
   status: MandatoryPaymentStatus;
+  categoryId?: string;
+  linkedCreditId?: string;
+}
+
+export interface Credit {
+  id: string;
+  title: string;
+  openedAt: ISODate;
+  openingBalance: number;
+  note?: string;
+  isClosed: boolean;
+  order: number;
+}
+
+export type CreditEventKind = "charge" | "payment" | "adjustment";
+
+export interface CreditEvent {
+  id: string;
+  creditId: string;
+  date: ISODate;
+  kind: CreditEventKind;
+  amount: number;
+  note?: string;
+  linkedExpenseId?: string;
+  linkedMandatoryPaymentId?: string;
 }
 
 export interface VariableExpense {
   id: string;
   amount: number;
   date: ISODate;
+  paymentSource?: ExpensePaymentSource;
+  linkedCreditId?: string;
+  categoryId?: string;
+  /** Legacy fallback for older localStorage entries. New entries use categoryId. */
   category?: string;
+  title?: string;
   note?: string;
 }
 
@@ -112,6 +159,8 @@ export interface TransferToSavings {
   date: ISODate;
   planned: boolean;
   linkedGoalId?: string;
+  categoryId?: string;
+  title?: string;
   note?: string;
 }
 
@@ -119,6 +168,10 @@ export interface WithdrawalFromSavings {
   id: string;
   amount: number;
   date: ISODate;
+  categoryId?: string;
+  title?: string;
+  note?: string;
+  /** Legacy fallback for older localStorage entries. New entries use title/note. */
   reason?: string;
 }
 
@@ -156,11 +209,14 @@ export interface CalculationSettings {
 }
 
 export interface FinanceState {
-  schemaVersion: 2;
+  schemaVersion: 5;
   operationalBalance: number;
   payCycle: PayCycle;
+  rubrics: Rubric[];
   incomes: Income[];
   mandatoryPayments: MandatoryPayment[];
+  credits: Credit[];
+  creditEvents: CreditEvent[];
   variableExpenses: VariableExpense[];
   reserve: Reserve;
   savings: Savings;
@@ -252,6 +308,9 @@ export interface HistoryItem {
   kind: HistoryItemKind;
   title: string;
   amount: number;
+  cashEffect?: number;
   date: ISODate;
+  categoryId?: string;
+  legacyCategory?: string;
   detail?: string;
 }

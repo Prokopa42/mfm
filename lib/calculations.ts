@@ -17,6 +17,7 @@ import type {
   FinanceState,
   GoalStatus,
   HistoryItem,
+  IncomeKind,
   InterfaceState,
   ISODate,
   MandatoryPayment,
@@ -236,42 +237,59 @@ export function deriveInterfaceStates(input: {
 }
 
 export function buildHistory(state: FinanceState): HistoryItem[] {
+  const creditTitleById = new Map(state.credits.map((credit) => [credit.id, credit.title]));
   const items: HistoryItem[] = [
     ...state.incomes
       .filter((income) => income.receivedDate)
       .map((income) => ({
         id: income.id,
         kind: "income" as const,
-        title: income.kind === "paycheck" ? "Доход" : "Доход",
+        title: income.title || incomeKindLabel(income.kind),
         amount: income.amount,
         date: income.receivedDate ?? income.expectedDate,
-        detail: income.note
+        categoryId: income.categoryId,
+        detail: joinDetails(
+          income.title && income.title !== incomeKindLabel(income.kind)
+            ? incomeKindLabel(income.kind)
+            : undefined,
+          income.note
+        )
       })),
     ...state.variableExpenses.map((expense) => ({
       id: expense.id,
       kind: "expense" as const,
-      title: expense.category || "Расход",
+      title: expense.title || expense.category || "Расход",
       amount: -expense.amount,
+      cashEffect: expense.paymentSource === "credit" ? 0 : -expense.amount,
       date: expense.date,
-      detail: expense.note
+      categoryId: expense.categoryId,
+      legacyCategory: expense.category,
+      detail: joinDetails(
+        expense.paymentSource === "credit"
+          ? `Кредит · ${creditTitleById.get(expense.linkedCreditId ?? "") ?? "кредит"}`
+          : undefined,
+        expense.note
+      )
     })),
     ...state.transfersToSavings
       .filter((transfer) => !transfer.planned)
       .map((transfer) => ({
         id: transfer.id,
         kind: "transfer-to-savings" as const,
-        title: "В накопления",
+        title: transfer.title || "В накопления",
         amount: -transfer.amount,
         date: transfer.date,
+        categoryId: transfer.categoryId,
         detail: transfer.note
       })),
     ...state.withdrawalsFromSavings.map((withdrawal) => ({
       id: withdrawal.id,
       kind: "withdrawal-from-savings" as const,
-      title: "Снять с накоплений",
+      title: withdrawal.title || "Снять с накоплений",
       amount: withdrawal.amount,
       date: withdrawal.date,
-      detail: withdrawal.reason
+      categoryId: withdrawal.categoryId,
+      detail: withdrawal.note || withdrawal.reason
     })),
     ...state.mandatoryPayments
       .filter((payment) => payment.status === "paid")
@@ -281,11 +299,26 @@ export function buildHistory(state: FinanceState): HistoryItem[] {
         title: payment.title,
         amount: -payment.amount,
         date: payment.dueDate,
+        categoryId: payment.categoryId,
         detail: "Обязательный платёж"
       }))
   ];
 
   return items.sort((a, b) => compareDates(b.date, a.date));
+}
+
+function incomeKindLabel(kind: IncomeKind) {
+  const labels: Record<IncomeKind, string> = {
+    paycheck: "Зарплата",
+    bonus: "Премия",
+    other: "Доход"
+  };
+  return labels[kind];
+}
+
+function joinDetails(...parts: Array<string | undefined>) {
+  const values = parts.map((part) => part?.trim()).filter(Boolean);
+  return values.length > 0 ? values.join(" · ") : undefined;
 }
 
 export function stateLabel(state: InterfaceState) {

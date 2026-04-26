@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActionDialogKind } from "@/components/action-dialogs";
 import { Banner, CTARow, Glyph, HeroNumber, InlineNumber } from "@/components/mfm-ui";
 import { Button } from "@/components/ui/button";
@@ -62,16 +62,21 @@ function stateToBannerKind(state: InterfaceState): BannerKind | null {
 
 function Section({
   children,
-  compact = false
+  compact = false,
+  topLine = "var(--line-hair) solid var(--hair)",
+  bottomLine = "none"
 }: {
   children: React.ReactNode;
   compact?: boolean;
+  topLine?: string;
+  bottomLine?: string;
 }) {
   return (
     <section
       style={{
         padding: compact ? "8px var(--pad-x)" : "10px var(--pad-x)",
-        borderTop: "0.5px solid var(--hair)"
+        borderTop: topLine,
+        borderBottom: bottomLine
       }}
     >
       {children}
@@ -375,11 +380,14 @@ function PaceLine({
 }) {
   const color = ok ? "var(--blue)" : "var(--red)";
   return (
-    <Section>
+    <Section
+      topLine="var(--line-heavy) solid var(--hair)"
+      bottomLine="var(--line-heavy) solid var(--hair)"
+    >
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "2px auto auto 58px 1fr auto",
+          gridTemplateColumns: "2px auto auto minmax(120px, 1fr) auto",
           alignItems: "baseline",
           gap: 8,
           minWidth: 0
@@ -396,7 +404,6 @@ function PaceLine({
           </span>
         </span>
         <ForecastLine current={current} forecast={forecast} color={color} />
-        <div />
         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
           <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>
             к {date}
@@ -430,7 +437,9 @@ function ForecastLine({
   forecast: number;
   color: string;
 }) {
-  const width = 56;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(120);
+  const width = Math.max(120, containerWidth);
   const height = 18;
   const pad = 2;
   const steps = 5;
@@ -451,19 +460,36 @@ function ForecastLine({
     })
     .join(" ");
 
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const updateWidth = () => {
+      const nextWidth = Math.round(element.clientWidth);
+      if (nextWidth > 0) setContainerWidth(nextWidth);
+    };
+
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      aria-label="Прогноз темпа накоплений"
-      role="img"
-      style={{ display: "block", alignSelf: "center" }}
-    >
-      <title>Прогноз: от текущих накоплений к рассчитанной сумме</title>
-      <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="var(--hair)" strokeWidth="0.7" />
-      <polyline points={points} fill="none" stroke={color} strokeWidth="1.2" />
-    </svg>
+    <div ref={containerRef} style={{ width: "100%", minWidth: 0, alignSelf: "center" }}>
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        aria-label="Прогноз темпа накоплений"
+        role="img"
+        style={{ display: "block" }}
+      >
+        <title>Прогноз: от текущих накоплений к рассчитанной сумме</title>
+        <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="var(--hair)" strokeWidth="0.7" />
+        <polyline points={points} fill="none" stroke={color} strokeWidth="1.2" />
+      </svg>
+    </div>
   );
 }
 
@@ -490,7 +516,7 @@ function CycleMini({
     .filter((payment) => isBeforeOrSame(payment.date, endDate));
 
   return (
-    <Section>
+    <Section topLine="none" bottomLine="var(--line-heavy) solid var(--hair)">
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 7 }}>
         <span className="eyebrow eyebrow--ink">Цикл</span>
         <div style={{ flex: 1, height: 0.5, background: "var(--hair)" }} />
@@ -598,7 +624,7 @@ function CycleMini({
 function PaymentLine({ payment }: { payment?: MandatoryPayment }) {
   if (!payment) {
     return (
-      <Section compact>
+      <Section compact topLine="none">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <div style={{ width: 2, height: 17, background: "var(--ink-35)" }} />
           <span className="eyebrow">ближайший</span>
@@ -611,7 +637,7 @@ function PaymentLine({ payment }: { payment?: MandatoryPayment }) {
   }
 
   return (
-    <Section compact>
+    <Section compact topLine="none">
       <div
         style={{
           display: "grid",
