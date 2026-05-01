@@ -245,8 +245,10 @@ export function TabBar({ items, activeId, onSelect, className }: TabBarProps) {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: 4,
-              padding: "9px 0 7px",
+              justifyContent: "center",
+              gap: 5,
+              minHeight: "var(--tabbar-base)",
+              padding: "12px 0 calc(10px + env(safe-area-inset-bottom))",
               position: "relative",
               opacity: active ? 1 : 0.5,
               background: "transparent",
@@ -268,19 +270,19 @@ export function TabBar({ items, activeId, onSelect, className }: TabBarProps) {
                 }}
               />
             )}
-            <div style={{ height: 11, display: "flex", alignItems: "center" }}>
+            <div style={{ height: 13, display: "flex", alignItems: "center" }}>
               <Glyph
                 shape={it.shape}
                 fill={active ? "var(--ink)" : "none"}
                 stroke={active ? null : "var(--ink-80)"}
-                size={10}
+                size={11}
                 sw={1}
               />
             </div>
             <span
               className="slab"
               style={{
-                fontSize: 7.5,
+                fontSize: 8,
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
                 color: active ? "var(--ink)" : "var(--ink-55)"

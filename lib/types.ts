@@ -264,6 +264,8 @@ export interface CalculationSnapshot {
   availableUntilNextPaycheck: number;
   incomeBeforeNextPaycheck: number;
   mandatoryPaymentsBeforeNextPaycheck: number;
+  paydayMandatoryPayments: MandatoryPayment[];
+  paydayMandatoryPaymentsTotal: number;
   plannedSavingsTransfersBeforeNextPaycheck: number;
   safeToSpendToday: number;
   ifZeroTodayTomorrow: number;

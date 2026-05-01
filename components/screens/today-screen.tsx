@@ -138,6 +138,10 @@ function Hero({
 }) {
   const tickValue = Math.round(safeToday / 100) * 100;
   const delta = Math.max(0, Math.round(tomorrow - safeToday));
+  const freeUntilLabel =
+    freeUntilPaycheck < 0
+      ? `до безопасного минимума не хватает ${formatMoney(Math.abs(freeUntilPaycheck))} ₽`
+      : `до зарплаты ${formatMoney(freeUntilPaycheck)} ₽`;
   return (
     <div
       style={{
@@ -164,7 +168,7 @@ function Hero({
           className="mono"
           style={{ marginTop: 8, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.35 }}
         >
-          до зарплаты {formatMoney(freeUntilPaycheck)} ₽ · {remainingDays} дн.
+          {freeUntilLabel} · {remainingDays} дн.
         </div>
         <div style={{ marginTop: 18, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <span className="eyebrow eyebrow--ink">если не трачу — завтра</span>
@@ -190,6 +194,7 @@ function FormulaDisclosure({
   safeToday: number;
 }) {
   const [open, setOpen] = useState(false);
+  const hasSafeMinimumDeficit = snapshot.availableUntilNextPaycheck < 0;
   return (
     <Section compact>
       <button
@@ -227,6 +232,13 @@ function FormulaDisclosure({
             label="Обязательные платежи"
             value={snapshot.mandatoryPaymentsBeforeNextPaycheck}
           />
+          {snapshot.paydayMandatoryPaymentsTotal > 0 && (
+            <FormulaRow
+              sign="•"
+              label="В день зарплаты · не вычтено"
+              value={snapshot.paydayMandatoryPaymentsTotal}
+            />
+          )}
           <FormulaRow sign="−" label="Подушка" value={state.reserve.amount} />
           {snapshot.plannedSavingsTransfersBeforeNextPaycheck > 0 && (
             <FormulaRow
@@ -235,7 +247,12 @@ function FormulaDisclosure({
               value={snapshot.plannedSavingsTransfersBeforeNextPaycheck}
             />
           )}
-          <FormulaRow sign="=" label="Свободно до зарплаты" value={snapshot.availableUntilNextPaycheck} strong />
+          <FormulaRow
+            sign="="
+            label={hasSafeMinimumDeficit ? "До безопасного минимума не хватает" : "Свободно до зарплаты"}
+            value={hasSafeMinimumDeficit ? Math.abs(snapshot.availableUntilNextPaycheck) : snapshot.availableUntilNextPaycheck}
+            strong
+          />
           <FormulaRow sign="÷" label="Осталось дней" value={snapshot.remainingDays} numberOnly />
           <FormulaRow sign="=" label="Можно потратить сегодня" value={safeToday} strong />
         </div>
@@ -621,7 +638,7 @@ function CycleMini({
   );
 }
 
-function PaymentLine({ payment }: { payment?: MandatoryPayment }) {
+function PaymentLine({ payment, isPaydayPayment = false }: { payment?: MandatoryPayment; isPaydayPayment?: boolean }) {
   if (!payment) {
     return (
       <Section compact topLine="none">
@@ -653,7 +670,7 @@ function PaymentLine({ payment }: { payment?: MandatoryPayment }) {
             {payment.title}
           </span>
           <span className="mono" style={{ marginLeft: 6, fontSize: 9.5, color: "var(--ink-55)" }}>
-            · {formatShortDate(payment.dueDate)} · {payment.status === "paid" ? "оплачен" : "учтён"}
+            · {formatShortDate(payment.dueDate)} · {payment.status === "paid" ? "оплачен" : isPaydayPayment ? "в день зарплаты" : "учтён"}
           </span>
         </div>
         <InlineNumber value={formatMoney(payment.amount)} size={13} color="var(--ink)" />
@@ -795,7 +812,7 @@ export function TodayScreen({
   return (
     <div
       style={{
-        minHeight: "calc(100dvh - env(safe-area-inset-bottom) - 52px)",
+        minHeight: "calc(100dvh - env(safe-area-inset-bottom) - var(--tabbar-base))",
         background: "var(--paper)",
         display: "flex",
         flexDirection: "column"
@@ -846,7 +863,10 @@ export function TodayScreen({
         today={snapshot.today}
         payments={payments}
       />
-      <PaymentLine payment={snapshot.nextMandatoryPayment} />
+      <PaymentLine
+        payment={snapshot.nextMandatoryPayment}
+        isPaydayPayment={snapshot.nextMandatoryPayment?.dueDate === snapshot.nextPaycheckDate}
+      />
       <div style={{ flex: 1, minHeight: 10 }} />
       <FooterStrips state={state} savingsAccent={savingsAccent} />
       <ActionRow onAction={onAction} />

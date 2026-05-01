@@ -54,10 +54,8 @@ export interface SavingsAllocationPayload {
      - cushion.allocated + Σ goals.allocated + unallocated = totalSavings
 
    Honest data:
-     - PotTrajectory renders from explicit point series. If the real ledger
-       has enough transfer/withdrawal points, it uses those; otherwise it
-       falls back to a named demo point pattern for visual QA. The chart
-       never draws a decorative line without input points.
+     - PotTrajectory renders from real transfersToSavings and
+       withdrawalsFromSavings only. No demo points in production UI.
      - Goals with status="unconfigured" render in NEUTRAL styling — no
        red/yellow alarm, no off-track marker. Only "behind" is alarming.
      - "Распределить" CTA secondary is DISABLED (no allocation flow yet —
@@ -69,16 +67,6 @@ const RU_MONTH_SHORT = [
   "янв", "фев", "мар", "апр", "май", "июн",
   "июл", "авг", "сен", "окт", "ноя", "дек"
 ];
-
-const DEMO_POT_HISTORY_PATTERN = [
-  { progress: 0, ratio: 0 },
-  { progress: 0.14, ratio: 0.08 },
-  { progress: 0.3, ratio: 0.22 },
-  { progress: 0.48, ratio: 0.4 },
-  { progress: 0.66, ratio: 0.58 },
-  { progress: 0.84, ratio: 0.79 },
-  { progress: 1, ratio: 1 }
-] as const;
 
 function fmtDate(iso: string) {
   const d = parseISODate(iso);
@@ -419,7 +407,7 @@ function TriadCell({
 
 // ─── PotTrajectory — explicit point series, no hidden fake line ──
 type PotTrajectoryPointKind = "history" | "today" | "forecast";
-type PotTrajectorySource = "ledger" | "demo";
+type PotTrajectorySource = "ledger" | "empty";
 
 interface PotTrajectoryPoint {
   date: ISODate;
@@ -430,6 +418,7 @@ interface PotTrajectoryPoint {
 interface PotTrajectoryData {
   points: PotTrajectoryPoint[];
   source: PotTrajectorySource;
+  movementCount: number;
   forecastReal: number;
   forecastDateLabel: string;     // e.g. "31.12.26" or "+12 мес."
   hasDeadline: boolean;
@@ -453,6 +442,8 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
   const dateSpan = startDate && endDate ? Math.max(1, daysBetween(startDate, endDate)) : 1;
   const todayPoint = d.points.find((point) => point.kind === "today") ?? d.points[0];
   const forecastPoint = d.points.find((point) => point.kind === "forecast") ?? d.points[d.points.length - 1];
+  const factPoints = d.points.filter((point) => point.kind !== "forecast");
+  const lastFactPoint = factPoints[factPoints.length - 1] ?? todayPoint;
 
   useEffect(() => {
     const node = wrapRef.current;
@@ -477,14 +468,15 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
     x: xAt(point.date),
     y: yAt(point.amount)
   });
-  const historyPoints = d.points.filter((point) => point.kind !== "forecast");
+  const historyPoints = factPoints;
+  const hasHistoryLine = historyPoints.length > 1;
   const historyPath = historyPoints
     .map((point) => {
       const { x, y } = pointToCoord(point);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
-  const forecastPath = [todayPoint, forecastPoint]
+  const forecastPath = [lastFactPoint, forecastPoint]
     .map((point) => {
       const { x, y } = pointToCoord(point);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
@@ -528,12 +520,14 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
             strokeDasharray="1 2"
           />
 
-          <polyline
-            points={historyPath}
-            fill="none"
-            stroke="var(--ink)"
-            strokeWidth="0.8"
-          />
+          {hasHistoryLine && (
+            <polyline
+              points={historyPath}
+              fill="none"
+              stroke="var(--ink)"
+              strokeWidth="0.8"
+            />
+          )}
           <polyline
             points={forecastPath}
             fill="none"
@@ -601,8 +595,8 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
 
       <div className="mono" style={{ marginTop: 2, fontSize: 8.5, color: "var(--ink-55)" }}>
         {d.source === "ledger"
-          ? "линия факта собрана из переводов и снятий"
-          : "demo-точки для проверки экрана · прогноз от текущего котла"}
+          ? `Факт: ${d.movementCount} движ. · переводы и снятия`
+          : "История накоплений ещё не сформирована"}
       </div>
 
       {/* Forecast pair — about the POT */}
@@ -1433,14 +1427,13 @@ function buildPotTrajectorySeries({
   snapshot: CalculationSnapshot;
   forecastDate: ISODate;
   forecastNominal: number;
-}): { points: PotTrajectoryPoint[]; source: PotTrajectorySource } {
-  const ledgerPoints = buildLedgerPotHistory(state, snapshot);
-  const source: PotTrajectorySource = ledgerPoints.length >= 4 ? "ledger" : "demo";
-  const history = source === "ledger" ? ledgerPoints : buildDemoPotHistory(state, snapshot);
+}): { points: PotTrajectoryPoint[]; source: PotTrajectorySource; movementCount: number } {
+  const ledger = buildLedgerPotHistory(state, snapshot);
+  const source: PotTrajectorySource = ledger.movementCount > 0 ? "ledger" : "empty";
   const safeForecastDate =
     daysBetween(snapshot.today, forecastDate) > 0 ? forecastDate : addDays(snapshot.today, 30);
   const points = [
-    ...history,
+    ...ledger.points,
     {
       date: safeForecastDate,
       amount: forecastNominal,
@@ -1448,10 +1441,13 @@ function buildPotTrajectorySeries({
     }
   ];
 
-  return { points, source };
+  return { points, source, movementCount: ledger.movementCount };
 }
 
-function buildLedgerPotHistory(state: FinanceState, snapshot: CalculationSnapshot): PotTrajectoryPoint[] {
+function buildLedgerPotHistory(
+  state: FinanceState,
+  snapshot: CalculationSnapshot
+): { points: PotTrajectoryPoint[]; movementCount: number } {
   const startDate = state.savings.openedAt;
   const today = snapshot.today;
   const operations = [
@@ -1470,6 +1466,19 @@ function buildLedgerPotHistory(state: FinanceState, snapshot: CalculationSnapsho
       return daysBetween(startDate, operation.date) >= 0 && daysBetween(operation.date, today) >= 0;
     })
     .sort((a, b) => compareDates(a.date, b.date));
+
+  if (operations.length === 0) {
+    return {
+      points: [
+        {
+          date: today,
+          amount: Math.round(snapshot.totalSavings),
+          kind: "today"
+        }
+      ],
+      movementCount: 0
+    };
+  }
 
   let running = state.savings.baselineBalance;
   const points: PotTrajectoryPoint[] = [
@@ -1495,23 +1504,7 @@ function buildLedgerPotHistory(state: FinanceState, snapshot: CalculationSnapsho
     kind: "today"
   });
 
-  return points;
-}
-
-function buildDemoPotHistory(state: FinanceState, snapshot: CalculationSnapshot): PotTrajectoryPoint[] {
-  const startDate = state.savings.openedAt;
-  const today = snapshot.today;
-  const totalDays = Math.max(1, daysBetween(startDate, today));
-  const startAmount = state.savings.baselineBalance;
-  const delta = snapshot.totalSavings - startAmount;
-
-  return DEMO_POT_HISTORY_PATTERN.map((step, index) => ({
-    date: index === DEMO_POT_HISTORY_PATTERN.length - 1
-      ? today
-      : addDays(startDate, Math.round(totalDays * step.progress)),
-    amount: Math.round(startAmount + delta * step.ratio),
-    kind: index === DEMO_POT_HISTORY_PATTERN.length - 1 ? "today" : "history"
-  }));
+  return { points, movementCount: operations.length };
 }
 
 function upsertPoint(points: PotTrajectoryPoint[], next: PotTrajectoryPoint) {
@@ -1879,8 +1872,8 @@ export function SavingsScreen({
   }
 
   // Trajectory point series:
-  //   - real ledger points when there are enough dated transfers/withdrawals;
-  //   - otherwise named demo points anchored to baseline/current pot.
+  //   - factual line from real transfersToSavings and withdrawalsFromSavings;
+  //   - if there are no movements, only the current point is shown.
   // Forecast horizon = primaryGoal deadline if any, else +12 months default.
   const hasDeadline = Boolean(snapshot.primaryGoal?.goal.deadline);
   const forecastDate = hasDeadline
@@ -1898,6 +1891,7 @@ export function SavingsScreen({
   const trajectory: PotTrajectoryData = {
     points: trajectorySeries.points,
     source: trajectorySeries.source,
+    movementCount: trajectorySeries.movementCount,
     forecastReal: Math.round(snapshot.savingsForecastReal),
     forecastDateLabel,
     hasDeadline
@@ -1908,7 +1902,7 @@ export function SavingsScreen({
       style={{
         display: "flex",
         flexDirection: "column",
-        minHeight: "calc(100dvh - env(safe-area-inset-bottom) - 52px)",
+        minHeight: "calc(100dvh - env(safe-area-inset-bottom) - var(--tabbar-base))",
         background: "var(--paper)"
       }}
     >
@@ -1949,7 +1943,7 @@ export function SavingsScreen({
       <div
         style={{
           position: "sticky",
-          bottom: "calc(env(safe-area-inset-bottom) + 52px)",
+          bottom: "calc(env(safe-area-inset-bottom) + var(--tabbar-base))",
           zIndex: 5,
           background: "var(--paper)"
         }}

@@ -19,6 +19,7 @@ import {
   daysBetween,
   isAfterOrSame,
   isBeforeOrSame,
+  isSameDate,
   parseISODate
 } from "@/lib/dates";
 import type {
@@ -57,8 +58,9 @@ interface CycleScreenProps {
    throughout (visually + structurally + textually):
      paid    — оплачен (мат-факт)
      due     — к оплате (вот-вот / просрочен)
+     payday  — в день зарплаты (виден, но не режет текущий лимит)
      counted — учтён в лимите (вычтен из свободного, но дата позже)
-   This mirrors hi-fi {paid, due, counted} status vocabulary.
+   This mirrors hi-fi {paid, due, payday, counted} status vocabulary.
    ───────────────────────────────────────────────────────────── */
 
 // ─── ru locale: month-short without trailing dot (Intl adds it) ─
@@ -78,39 +80,40 @@ function fmtTodayAxisLabel(iso: ISODate) {
 }
 
 // ─── Hi-fi status derivation ─────────────────────────────
-type HiFiStatus = "paid" | "due" | "counted";
+type HiFiStatus = "paid" | "due" | "payday" | "counted";
 
 const STATUS_COLOR: Record<HiFiStatus, string> = {
   paid: "var(--ink-55)",
   due: "var(--red)",
+  payday: "var(--yellow)",
   counted: "var(--blue)"
 };
 
 const STATUS_SOFT_BG: Record<HiFiStatus, string> = {
   paid: "transparent",
   due: "rgba(214, 48, 49, 0.08)",
+  payday: "rgba(236, 204, 58, 0.16)",
   counted: "rgba(7, 73, 169, 0.08)"
 };
 
 const STATUS_LABEL: Record<HiFiStatus, string> = {
   paid: "Оплачены",
   due: "К оплате",
+  payday: "В день зарплаты",
   counted: "Учтены в лимите"
 };
 
 /**
- * Map our MandatoryPaymentStatus + due-date proximity into hi-fi vocabulary.
- *   - "paid"    → hi-fi "paid"
- *   - status not paid AND (overdue OR dueDate ≤ today + 1)  → "due"
- *   - status not paid AND dueDate further out                → "counted"
- *
- * `counted` corresponds to "уже вычтен из свободного остатка, но платить не пора".
- * This split must stay readable — both label and colour carry it.
+ * Map payment state into the hi-fi vocabulary used by Cycle.
+ * Payday-date payments are visible before payday, but not counted in the
+ * current pre-paycheck limit. On payday they become due.
  */
-function hifiStatus(payment: MandatoryPayment, today: ISODate): HiFiStatus {
+function hifiStatus(payment: MandatoryPayment, today: ISODate, nextPaycheckDate: ISODate): HiFiStatus {
   if (payment.status === "paid") return "paid";
+  if (payment.status === "missed") return "due";
+  if (isSameDate(payment.dueDate, nextPaycheckDate) && compareDates(today, nextPaycheckDate) < 0) return "payday";
   const diff = daysBetween(today, payment.dueDate);
-  if (payment.status === "missed" || diff <= 1) return "due";
+  if (diff <= 1) return "due";
   return "counted";
 }
 
@@ -392,6 +395,9 @@ function FullCycleAxis({ d }: { d: FullCycleAxisData }) {
                 {p.status === "due" && (
                   <polygon points={`${x - 2.2},${y0 - 1} ${x + 2.2},${y0 - 1} ${x},${y0 - 4}`} fill={col} />
                 )}
+                {p.status === "payday" && (
+                  <rect x={x - 2.1} y={y0 - 4.1} width="4.2" height="4.2" fill="none" stroke={col} strokeWidth="1" />
+                )}
                 {p.status === "counted" && (
                   <circle cx={x} cy={y0} r="1.6" fill="none" stroke={col} strokeWidth="1" />
                 )}
@@ -444,15 +450,18 @@ function FullCycleAxis({ d }: { d: FullCycleAxisData }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, auto)",
+          gridTemplateColumns: "repeat(4, max-content)",
           justifyContent: "start",
           alignItems: "center",
-          columnGap: 14,
-          marginTop: -6
+          columnGap: 9,
+          marginTop: -6,
+          overflow: "hidden",
+          whiteSpace: "nowrap"
         }}
       >
         <LegendItem label="оплачен" color={STATUS_COLOR.paid} shape="bar" />
         <LegendItem label="к оплате" color={STATUS_COLOR.due} shape="tri" />
+        <LegendItem label="в день зарплаты" color={STATUS_COLOR.payday} shape="square" />
         <LegendItem label="учтён" color={STATUS_COLOR.counted} shape="dot" />
       </div>
     </div>
@@ -466,16 +475,19 @@ function LegendItem({
 }: {
   label: string;
   color: string;
-  shape: "bar" | "tri" | "dot";
+  shape: "bar" | "tri" | "square" | "dot";
 }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0, whiteSpace: "nowrap" }}>
       <svg width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
         {shape === "bar" && <line x1="3" y1="6" x2="9" y2="6" stroke={color} strokeWidth="1.5" />}
         {shape === "tri" && <polygon points="3,8 9,8 6,3.5" fill={color} />}
+        {shape === "square" && (
+          <rect x="3.6" y="3.6" width="4.8" height="4.8" fill="none" stroke={color} strokeWidth="1.5" />
+        )}
         {shape === "dot" && <circle cx="6" cy="6" r="2.7" fill="none" stroke={color} strokeWidth="1.5" />}
       </svg>
-      <span className="mono" style={{ fontSize: 7.8, color: "var(--ink-55)", letterSpacing: "0.04em" }}>
+      <span className="mono" style={{ fontSize: 7.3, color: "var(--ink-55)", letterSpacing: "0.02em" }}>
         {label}
       </span>
     </span>
@@ -1120,6 +1132,7 @@ function PaymentsList({
   onCancelPayment: (paymentId: string) => void;
 }) {
   const due = d.payments.filter((p) => p.status === "due");
+  const payday = d.payments.filter((p) => p.status === "payday");
   const counted = d.payments.filter((p) => p.status === "counted");
   const paid = d.payments.filter((p) => p.status === "paid");
 
@@ -1152,6 +1165,14 @@ function PaymentsList({
         status="counted"
         payments={counted}
         emptyText="нет будущих платежей"
+        onPayPayment={onPayPayment}
+        onEditPayment={onEditPayment}
+        onCancelPayment={onCancelPayment}
+      />
+      <PaymentGroup
+        status="payday"
+        payments={payday}
+        emptyText="нет платежей в день зарплаты"
         onPayPayment={onPayPayment}
         onEditPayment={onEditPayment}
         onCancelPayment={onCancelPayment}
@@ -1291,7 +1312,7 @@ function PaymentGroup({
                     flexShrink: 0,
                     border: "none",
                     background: "transparent",
-                    color: p.status === "due" ? "var(--red)" : "var(--blue)",
+                    color: p.status === "due" ? "var(--red)" : p.status === "payday" ? "var(--ink)" : "var(--blue)",
                     cursor: "pointer",
                     fontFamily: "inherit",
                     fontSize: 8.5,
@@ -1351,7 +1372,10 @@ function PaymentGroup({
             </div>
             <span
               className="slab tnum"
-              style={{ fontSize: 12, color: p.status === "due" ? "var(--red)" : "var(--ink)" }}
+              style={{
+                fontSize: 12,
+                color: p.status === "due" ? "var(--red)" : p.status === "payday" ? "var(--ink)" : "var(--ink)"
+              }}
             >
               {formatMoney(p.amount)}
               <span className="mono" style={{ fontSize: 8.5, color: "var(--ink-55)" }}>
@@ -2149,7 +2173,7 @@ export function CycleScreen({
     .sort((a, b) => compareDates(a.dueDate, b.dueDate))
     .map((p) => ({
       ...p,
-      _hifiStatus: hifiStatus(p, snapshot.today)
+      _hifiStatus: hifiStatus(p, snapshot.today, snapshot.nextPaycheckDate)
     }));
 
   // ─── Axis payments (id + dayIdx + hi-fi status) ──────
@@ -2174,7 +2198,7 @@ export function CycleScreen({
   // Pick the first non-paid payment in the live cycle window. This includes
   // missed/overdue payments, unlike upcoming-only lists.
   const nextRaw = cyclePayments.find((p) => p.status !== "paid");
-  const nextStatus = nextRaw ? hifiStatus(nextRaw, snapshot.today) : null;
+  const nextStatus = nextRaw ? hifiStatus(nextRaw, snapshot.today, snapshot.nextPaycheckDate) : null;
   const nextCallout: NextPaymentCalloutData =
     nextRaw && nextStatus
       ? {
@@ -2260,7 +2284,7 @@ export function CycleScreen({
       style={{
         display: "flex",
         flexDirection: "column",
-        minHeight: "calc(100dvh - env(safe-area-inset-bottom) - 52px)",
+        minHeight: "calc(100dvh - env(safe-area-inset-bottom) - var(--tabbar-base))",
         background: "var(--paper)"
       }}
     >
@@ -2304,7 +2328,7 @@ export function CycleScreen({
       <div
         style={{
           position: "sticky",
-          bottom: "calc(env(safe-area-inset-bottom) + 52px)",
+          bottom: "calc(env(safe-area-inset-bottom) + var(--tabbar-base))",
           zIndex: 5,
           background: "var(--paper)"
         }}

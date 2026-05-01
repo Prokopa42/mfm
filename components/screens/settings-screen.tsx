@@ -141,8 +141,10 @@ function clampNumber(value: number, min: number, max: number, decimals?: number)
   return decimals === undefined ? Math.round(clamped) : Number(clamped.toFixed(decimals));
 }
 
-function formatNumber(value: number, decimals?: number) {
-  if (decimals === undefined) return String(Math.round(value));
+function formatNumber(value: number, decimals?: number, grouped = false) {
+  if (decimals === undefined) {
+    return grouped ? formatMoney(value) : String(Math.round(value));
+  }
   return Number(value.toFixed(decimals)).toString();
 }
 
@@ -230,7 +232,8 @@ function NumericInputControl({
   decimals,
   ariaLabel
 }: NumericInputControlProps) {
-  const [text, setText] = useState(() => formatNumber(value, decimals));
+  const grouped = variant === "money";
+  const [text, setText] = useState(() => formatNumber(value, decimals, grouped));
   const [focused, setFocused] = useState(false);
   const sizes = {
     day: { width: 92, button: 16, valueMin: 44 },
@@ -239,8 +242,8 @@ function NumericInputControl({
   }[variant];
 
   useEffect(() => {
-    if (!focused) setText(formatNumber(value, decimals));
-  }, [decimals, focused, value]);
+    if (!focused) setText(formatNumber(value, decimals, grouped));
+  }, [decimals, focused, grouped, value]);
 
   function commit(nextText: string) {
     const parsed = parseNumberInput(nextText);
@@ -251,7 +254,7 @@ function NumericInputControl({
   function stepBy(delta: number) {
     const parsed = parseNumberInput(text) ?? value;
     const next = clampNumber(parsed + delta * step, min, max, decimals);
-    setText(formatNumber(next, decimals));
+    setText(formatNumber(next, decimals, grouped && !focused));
     onChange(next);
   }
 
@@ -300,10 +303,16 @@ function NumericInputControl({
             setText(event.currentTarget.value);
             commit(event.currentTarget.value);
           }}
-          onFocus={() => setFocused(true)}
+          onFocus={() => {
+            setFocused(true);
+            setText(formatNumber(value, decimals));
+          }}
           onBlur={() => {
             setFocused(false);
-            setText(formatNumber(value, decimals));
+            const parsed = parseNumberInput(text);
+            const next = parsed === null ? value : clampNumber(parsed, min, max, decimals);
+            if (parsed !== null) onChange(next);
+            setText(formatNumber(next, decimals, grouped));
           }}
           inputMode={min < 0 || decimals !== undefined ? "decimal" : "numeric"}
           aria-label={ariaLabel}

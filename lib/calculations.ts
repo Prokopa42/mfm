@@ -38,11 +38,22 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     .filter((income) => isBeforeOrSame(income.expectedDate, nextPaycheckDate))
     .reduce((sum, income) => sum + income.amount, 0);
 
-  const relevantMandatory = state.mandatoryPayments
-    .filter((payment) => payment.status === "scheduled" || payment.status === "missed")
-    .filter((payment) => isBeforeOrSame(payment.dueDate, nextPaycheckDate));
+  const unpaidMandatoryPayments = state.mandatoryPayments
+    .filter((payment) => payment.status === "scheduled" || payment.status === "missed");
+  const mandatoryPaymentsBeforeNextPaycheckList = unpaidMandatoryPayments
+    .filter((payment) => compareDates(payment.dueDate, nextPaycheckDate) < 0);
+  const paydayMandatoryPayments = unpaidMandatoryPayments
+    .filter((payment) => isSameDate(payment.dueDate, nextPaycheckDate));
+  const visibleMandatoryPaymentsUntilNextPaycheck = [
+    ...mandatoryPaymentsBeforeNextPaycheckList,
+    ...paydayMandatoryPayments
+  ];
 
-  const mandatoryPaymentsBeforeNextPaycheck = relevantMandatory.reduce(
+  const mandatoryPaymentsBeforeNextPaycheck = mandatoryPaymentsBeforeNextPaycheckList.reduce(
+    (sum, payment) => sum + payment.amount,
+    0
+  );
+  const paydayMandatoryPaymentsTotal = paydayMandatoryPayments.reduce(
     (sum, payment) => sum + payment.amount,
     0
   );
@@ -94,10 +105,10 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     savingsForecastNominal * Math.pow(state.settings.purchasingPowerCoef, yearsUntilPrimaryTarget);
 
   const tomorrow = addDays(today, 1);
-  const upcomingMandatoryPayments = relevantMandatory
+  const upcomingMandatoryPayments = visibleMandatoryPaymentsUntilNextPaycheck
     .filter((payment) => compareDates(payment.dueDate, today) >= 0)
     .sort((a, b) => compareDates(a.dueDate, b.dueDate));
-  const overdueMandatoryPayments = relevantMandatory
+  const overdueMandatoryPayments = visibleMandatoryPaymentsUntilNextPaycheck
     .filter((payment) => compareDates(payment.dueDate, today) < 0)
     .sort((a, b) => compareDates(a.dueDate, b.dueDate));
 
@@ -106,7 +117,7 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     remainingDays,
     safeToSpendToday,
     isPaydayToday: isSameDate(firstNextPaycheckDate, today) && !isSameDate(state.payCycle.startDate, today),
-    hasPaymentTomorrow: relevantMandatory.some((payment) => isSameDate(payment.dueDate, tomorrow)),
+    hasPaymentTomorrow: visibleMandatoryPaymentsUntilNextPaycheck.some((payment) => isSameDate(payment.dueDate, tomorrow)),
     hasOffTrackGoal: goals.some((goal) => Boolean(goal.goal.deadline) && goal.status === "behind")
   });
 
@@ -147,6 +158,8 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     availableUntilNextPaycheck,
     incomeBeforeNextPaycheck: expectedIncome,
     mandatoryPaymentsBeforeNextPaycheck,
+    paydayMandatoryPayments,
+    paydayMandatoryPaymentsTotal,
     plannedSavingsTransfersBeforeNextPaycheck,
     safeToSpendToday,
     ifZeroTodayTomorrow,
