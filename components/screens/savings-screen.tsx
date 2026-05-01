@@ -119,7 +119,7 @@ function SavingsHeader({ d }: { d: SavingsHeaderData }) {
         </span>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span className="eyebrow">темп котла</span>
+        <span className="eyebrow">средний темп</span>
         <span
           className="slab tnum"
           style={{ fontSize: 13, color: positive ? "var(--blue)" : "var(--red)" }}
@@ -315,7 +315,7 @@ function AllocationBar({ d }: { d: AllocationData }) {
         <TriadCell label="распределено" value={d.totalAllocated} />
         <TriadCell label="не распределено" value={d.unallocated} divider muted={d.unallocated < 0} />
         <TriadCell
-          label="темп котла/мес"
+          label="средний темп/мес"
           value={d.monthlyPace}
           divider
           color="var(--blue)"

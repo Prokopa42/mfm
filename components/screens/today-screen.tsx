@@ -411,7 +411,7 @@ function PaceLine({
         }}
       >
         <div style={{ width: 2, height: 15, background: color, alignSelf: "center" }} />
-        <span className="eyebrow">темп</span>
+        <span className="eyebrow">средний темп</span>
         <span className="slab tnum" style={{ fontSize: 13, color: "var(--ink)" }}>
           {pace >= 0 ? "+" : "−"}
           {formatMoney(Math.abs(pace))}
@@ -502,7 +502,7 @@ function ForecastLine({
         role="img"
         style={{ display: "block" }}
       >
-        <title>Прогноз: от текущих накоплений к рассчитанной сумме</title>
+        <title>Прогноз: от текущих накоплений по среднему темпу котла</title>
         <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="var(--hair)" strokeWidth="0.7" />
         <polyline points={points} fill="none" stroke={color} strokeWidth="1.2" />
       </svg>
