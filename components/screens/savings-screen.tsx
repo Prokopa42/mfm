@@ -92,6 +92,7 @@ const GOAL_STATUS_LABEL: Record<GoalStatus, string> = {
 interface SavingsHeaderData {
   todayLabel: string;
   monthlyPace: number;
+  paceReady: boolean;
 }
 
 function SavingsHeader({ d }: { d: SavingsHeaderData }) {
@@ -120,16 +121,24 @@ function SavingsHeader({ d }: { d: SavingsHeaderData }) {
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
         <span className="eyebrow">средний темп</span>
-        <span
-          className="slab tnum"
-          style={{ fontSize: 13, color: positive ? "var(--blue)" : "var(--red)" }}
-        >
-          {positive ? "+" : "−"}
-          {formatMoney(Math.abs(d.monthlyPace))}
-        </span>
-        <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-55)" }}>
-          ₽/мес
-        </span>
+        {d.paceReady ? (
+          <>
+            <span
+              className="slab tnum"
+              style={{ fontSize: 13, color: positive ? "var(--blue)" : "var(--red)" }}
+            >
+              {positive ? "+" : "−"}
+              {formatMoney(Math.abs(d.monthlyPace))}
+            </span>
+            <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-55)" }}>
+              ₽/мес
+            </span>
+          </>
+        ) : (
+          <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-55)" }}>
+            не сформирован
+          </span>
+        )}
       </div>
     </div>
   );
@@ -189,6 +198,7 @@ interface AllocationData {
   totalAllocated: number;
   unallocated: number;
   monthlyPace: number;
+  paceReady: boolean;
   overAllocated: boolean;   // true if totalAllocated > totalSavings
 }
 
@@ -320,6 +330,7 @@ function AllocationBar({ d }: { d: AllocationData }) {
           divider
           color="var(--blue)"
           signed
+          unavailable={!d.paceReady}
         />
       </div>
     </div>
@@ -370,7 +381,8 @@ function TriadCell({
   divider,
   color = "var(--ink)",
   muted,
-  signed
+  signed,
+  unavailable
 }: {
   label: string;
   value: number;
@@ -378,6 +390,7 @@ function TriadCell({
   color?: string;
   muted?: boolean;
   signed?: boolean;
+  unavailable?: boolean;
 }) {
   const display = signed
     ? `${value >= 0 ? "+" : "−"}${formatMoney(Math.abs(value))}`
@@ -396,11 +409,13 @@ function TriadCell({
         className="slab tnum"
         style={{ fontSize: 13, color: muted ? "var(--red)" : color }}
       >
-        {display}
+        {unavailable ? "—" : display}
       </span>
-      <span className="mono" style={{ fontSize: 8.5, color: "var(--ink-55)", marginLeft: 3 }}>
-        ₽
-      </span>
+      {!unavailable && (
+        <span className="mono" style={{ fontSize: 8.5, color: "var(--ink-55)", marginLeft: 3 }}>
+          ₽
+        </span>
+      )}
     </div>
   );
 }
@@ -422,26 +437,71 @@ interface PotTrajectoryData {
   forecastReal: number;
   forecastDateLabel: string;     // e.g. "31.12.26" or "+12 мес."
   hasDeadline: boolean;
+  hasForecast: boolean;
+}
+
+function niceAmountStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
+  const power = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const normalized = rawStep / power;
+  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return nice * power;
+}
+
+function buildAmountTicks(minVal: number, maxVal: number) {
+  if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) return [];
+  if (minVal === maxVal) return [minVal];
+
+  let step = niceAmountStep((maxVal - minVal) / 4);
+  const start = Math.ceil(minVal / step) * step;
+  const ticks: number[] = [];
+  for (let value = start; value <= maxVal + step * 0.001; value += step) {
+    if (value >= minVal - step * 0.001) ticks.push(Math.round(value));
+  }
+  if (ticks.length < 2) {
+    step = step / 2;
+    const retryStart = Math.ceil(minVal / step) * step;
+    const retryTicks: number[] = [];
+    for (let value = retryStart; value <= maxVal + step * 0.001; value += step) {
+      if (value >= minVal - step * 0.001) retryTicks.push(Math.round(value));
+    }
+    if (retryTicks.length >= 2) return retryTicks.slice(0, 5);
+    return [Math.round(minVal), Math.round(maxVal)];
+  }
+  return ticks.slice(0, 5);
+}
+
+function formatAxisMoney(value: number) {
+  const abs = Math.abs(value);
+  const compact = new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 0
+  });
+  if (abs >= 1_000_000) return `${compact.format(value / 1_000_000)} млн`;
+  if (abs >= 1_000) return `${compact.format(value / 1_000)} тыс`;
+  return formatMoney(value);
 }
 
 function PotTrajectory({ d }: { d: PotTrajectoryData }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(304);
-  const H = 76;
-  const padX = 6;
+  const H = 82;
+  const padLeft = 43;
+  const padRight = 7;
   const padTop = 13;
   const padBottom = 18;
-  const plotW = Math.max(1, width - padX * 2);
+  const plotW = Math.max(1, width - padLeft - padRight);
   const plotH = H - padTop - padBottom;
   const amounts = d.points.map((point) => point.amount);
   const minVal = Math.min(...amounts);
   const maxVal = Math.max(...amounts);
   const range = maxVal - minVal || 1;
+  const amountTicks = buildAmountTicks(minVal, maxVal);
   const startDate = d.points[0]?.date;
   const endDate = d.points[d.points.length - 1]?.date;
   const dateSpan = startDate && endDate ? Math.max(1, daysBetween(startDate, endDate)) : 1;
   const todayPoint = d.points.find((point) => point.kind === "today") ?? d.points[0];
-  const forecastPoint = d.points.find((point) => point.kind === "forecast") ?? d.points[d.points.length - 1];
+  const forecastPoint = d.points.find((point) => point.kind === "forecast");
   const factPoints = d.points.filter((point) => point.kind !== "forecast");
   const lastFactPoint = factPoints[factPoints.length - 1] ?? todayPoint;
 
@@ -458,8 +518,8 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
   }, []);
 
   const xAt = (date: ISODate) => {
-    if (!startDate) return padX;
-    return padX + (daysBetween(startDate, date) / dateSpan) * plotW;
+    if (!startDate) return padLeft;
+    return padLeft + (daysBetween(startDate, date) / dateSpan) * plotW;
   };
   const yAt = (amount: number) => {
     return padTop + (1 - (amount - minVal) / range) * plotH;
@@ -476,14 +536,16 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
-  const forecastPath = [lastFactPoint, forecastPoint]
-    .map((point) => {
-      const { x, y } = pointToCoord(point);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const forecastPath = forecastPoint
+    ? [lastFactPoint, forecastPoint]
+        .map((point) => {
+          const { x, y } = pointToCoord(point);
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        })
+        .join(" ")
+    : "";
   const todayCoord = pointToCoord(todayPoint);
-  const forecastCoord = pointToCoord(forecastPoint);
+  const forecastCoord = forecastPoint ? pointToCoord(forecastPoint) : null;
 
   return (
     <div style={{ padding: "6px var(--pad-x) 10px", borderTop: "0.5px solid var(--hair)" }}>
@@ -491,7 +553,7 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
         <span className="eyebrow eyebrow--ink">Траектория котла</span>
         <div style={{ flex: 1, height: 0.5, background: "var(--hair)" }} />
         <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-55)" }}>
-          сегодня → {d.forecastDateLabel}
+          {d.hasForecast ? `сегодня → ${d.forecastDateLabel}` : "текущая точка"}
         </span>
       </div>
 
@@ -503,22 +565,57 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
           aria-label="Траектория котла накоплений"
         >
           <line
-            x1={padX}
+            x1={padLeft}
             y1={H - padBottom}
-            x2={width - padX}
+            x2={width - padRight}
             y2={H - padBottom}
             stroke="var(--hair)"
             strokeWidth="0.5"
           />
           <line
-            x1={padX}
+            x1={padLeft}
             y1={padTop - 5}
-            x2={width - padX}
+            x2={width - padRight}
             y2={padTop - 5}
             stroke="var(--hair)"
             strokeWidth="0.5"
             strokeDasharray="1 2"
           />
+
+          {amountTicks.map((tick) => {
+            const y = yAt(tick);
+            return (
+              <g key={tick}>
+                <line
+                  x1={padLeft}
+                  y1={y}
+                  x2={width - padRight}
+                  y2={y}
+                  stroke="var(--hair)"
+                  strokeWidth="0.45"
+                  strokeDasharray="1 3"
+                />
+                <line
+                  x1={padLeft - 4}
+                  y1={y}
+                  x2={padLeft - 1}
+                  y2={y}
+                  stroke="var(--ink-55)"
+                  strokeWidth="0.6"
+                />
+                <text
+                  x={padLeft - 7}
+                  y={y + 2.4}
+                  fontSize="7.2"
+                  fontFamily="var(--font-mono)"
+                  textAnchor="end"
+                  fill="var(--ink-55)"
+                >
+                  {formatAxisMoney(tick)}
+                </text>
+              </g>
+            );
+          })}
 
           {hasHistoryLine && (
             <polyline
@@ -528,13 +625,15 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
               strokeWidth="0.8"
             />
           )}
-          <polyline
-            points={forecastPath}
-            fill="none"
-            stroke="var(--blue)"
-            strokeWidth="1.1"
-            strokeDasharray="2 2"
-          />
+          {forecastPoint && (
+            <polyline
+              points={forecastPath}
+              fill="none"
+              stroke="var(--blue)"
+              strokeWidth="1.1"
+              strokeDasharray="2 2"
+            />
+          )}
 
           {historyPoints.map((point) => {
             const { x, y } = pointToCoord(point);
@@ -571,25 +670,29 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
             СЕГ
           </text>
 
-          <circle
-            cx={forecastCoord.x}
-            cy={forecastCoord.y}
-            r="2.6"
-            fill="none"
-            stroke="var(--blue)"
-            strokeWidth="1.2"
-          />
-          <text
-            x={forecastCoord.x}
-            y={Math.max(7, forecastCoord.y - 6)}
-            fontSize="7.5"
-            fontFamily="var(--font-slab)"
-            textAnchor="end"
-            fill="var(--blue)"
-            letterSpacing="0.8"
-          >
-            {d.hasDeadline ? d.forecastDateLabel.toUpperCase() : "ГОРИЗОНТ"}
-          </text>
+          {forecastCoord && (
+            <>
+              <circle
+                cx={forecastCoord.x}
+                cy={forecastCoord.y}
+                r="2.6"
+                fill="none"
+                stroke="var(--blue)"
+                strokeWidth="1.2"
+              />
+              <text
+                x={forecastCoord.x}
+                y={Math.max(7, forecastCoord.y - 6)}
+                fontSize="7.5"
+                fontFamily="var(--font-slab)"
+                textAnchor="end"
+                fill="var(--blue)"
+                letterSpacing="0.8"
+              >
+                {d.hasDeadline ? d.forecastDateLabel.toUpperCase() : "ГОРИЗОНТ"}
+              </text>
+            </>
+          )}
         </svg>
       </div>
 
@@ -599,31 +702,36 @@ function PotTrajectory({ d }: { d: PotTrajectoryData }) {
           : "История накоплений ещё не сформирована"}
       </div>
 
-      {/* Forecast pair — about the POT */}
-      <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div style={{ padding: "6px 0", borderTop: "0.5px solid var(--hair)" }}>
-          <div className="eyebrow" style={{ fontSize: 8, marginBottom: 2 }}>
-            котёл к {d.forecastDateLabel} · номин.
+      {forecastPoint ? (
+        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ padding: "6px 0", borderTop: "0.5px solid var(--hair)" }}>
+            <div className="eyebrow" style={{ fontSize: 8, marginBottom: 2 }}>
+              котёл к {d.forecastDateLabel} · номин.
+            </div>
+            <span className="slab tnum" style={{ fontSize: 15, color: "var(--blue)" }}>
+              {formatMoney(forecastPoint.amount)}
+            </span>
+            <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)", marginLeft: 3 }}>
+              ₽
+            </span>
           </div>
-          <span className="slab tnum" style={{ fontSize: 15, color: "var(--blue)" }}>
-            {formatMoney(forecastPoint.amount)}
-          </span>
-          <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)", marginLeft: 3 }}>
-            ₽
-          </span>
-        </div>
-        <div style={{ padding: "6px 0", borderTop: "0.5px solid var(--hair)" }}>
-          <div className="eyebrow" style={{ fontSize: 8, marginBottom: 2 }}>
-            в сегодняшних ₽
+          <div style={{ padding: "6px 0", borderTop: "0.5px solid var(--hair)" }}>
+            <div className="eyebrow" style={{ fontSize: 8, marginBottom: 2 }}>
+              в сегодняшних ₽
+            </div>
+            <span className="slab tnum" style={{ fontSize: 15, color: "var(--ink-55)" }}>
+              {formatMoney(d.forecastReal)}
+            </span>
+            <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)", marginLeft: 3 }}>
+              ₽
+            </span>
           </div>
-          <span className="slab tnum" style={{ fontSize: 15, color: "var(--ink-55)" }}>
-            {formatMoney(d.forecastReal)}
-          </span>
-          <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)", marginLeft: 3 }}>
-            ₽
-          </span>
         </div>
-      </div>
+      ) : (
+        <div className="mono" style={{ marginTop: 8, paddingTop: 6, borderTop: "0.5px solid var(--hair)", fontSize: 8.8, color: "var(--ink-55)", lineHeight: 1.35 }}>
+          Прогноз появится после устойчивой истории переводов и снятий.
+        </div>
+      )}
     </div>
   );
 }
@@ -646,7 +754,7 @@ function CushionBlock({ c }: { c: CushionSnapshot }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-        {/* Rotated rhombus glyph — distinct from goal markers, signals system reserve */}
+        {/* Rotated rhombus glyph — distinct from goal markers, signals savings jar. */}
         <div
           style={{
             width: 9,
@@ -659,7 +767,7 @@ function CushionBlock({ c }: { c: CushionSnapshot }) {
           className="slab"
           style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase" }}
         >
-          Подушка
+          Копилка
         </span>
         <span
           className="mono"
@@ -670,7 +778,7 @@ function CushionBlock({ c }: { c: CushionSnapshot }) {
             textTransform: "uppercase"
           }}
         >
-          · системный резерв
+          · внутри накоплений
         </span>
         <div style={{ flex: 1 }} />
         {isUnset ? (
@@ -717,8 +825,8 @@ function CushionBlock({ c }: { c: CushionSnapshot }) {
           }}
         >
           {hasAllocatedWithoutTarget
-            ? `Средства выделены: ${formatMoney(c.allocated)} ₽, но целевой размер не задан.`
-            : "Не настроена: денег в подушке нет и целевой размер не задан."}
+            ? `В копилке: ${formatMoney(c.allocated)} ₽, но целевой размер не задан.`
+            : "Копилка не настроена: денег нет и целевой размер не задан."}
         </div>
       ) : (
         <>
@@ -1421,25 +1529,29 @@ function buildPotTrajectorySeries({
   state,
   snapshot,
   forecastDate,
-  forecastNominal
+  forecastNominal,
+  includeForecast
 }: {
   state: FinanceState;
   snapshot: CalculationSnapshot;
   forecastDate: ISODate;
   forecastNominal: number;
+  includeForecast: boolean;
 }): { points: PotTrajectoryPoint[]; source: PotTrajectorySource; movementCount: number } {
   const ledger = buildLedgerPotHistory(state, snapshot);
   const source: PotTrajectorySource = ledger.movementCount > 0 ? "ledger" : "empty";
   const safeForecastDate =
     daysBetween(snapshot.today, forecastDate) > 0 ? forecastDate : addDays(snapshot.today, 30);
-  const points = [
-    ...ledger.points,
-    {
-      date: safeForecastDate,
-      amount: forecastNominal,
-      kind: "forecast" as const
-    }
-  ];
+  const points = includeForecast
+    ? [
+        ...ledger.points,
+        {
+          date: safeForecastDate,
+          amount: forecastNominal,
+          kind: "forecast" as const
+        }
+      ]
+    : ledger.points;
 
   return { points, source, movementCount: ledger.movementCount };
 }
@@ -1768,9 +1880,10 @@ export function SavingsScreen({
   const header: SavingsHeaderData = useMemo(
     () => ({
       todayLabel: fmtDate(snapshot.today),
-      monthlyPace: Math.round(snapshot.monthlySavingPace)
+      monthlyPace: Math.round(snapshot.monthlySavingPace),
+      paceReady: snapshot.savingsMovementCount > 0 && snapshot.savingsPaceDays >= 7
     }),
-    [snapshot.today, snapshot.monthlySavingPace]
+    [snapshot.today, snapshot.monthlySavingPace, snapshot.savingsMovementCount, snapshot.savingsPaceDays]
   );
 
   // Hero — strictly nominal. Pot balance is "сейчас" — no inflation
@@ -1785,7 +1898,7 @@ export function SavingsScreen({
     if (cushionAllocated > 0) {
       segments.push({
         id: "cushion",
-        label: "Подушка",
+        label: "Копилка",
         value: cushionAllocated,
         fill: "var(--ink)",
         textColor: "var(--ink)"
@@ -1821,9 +1934,10 @@ export function SavingsScreen({
       totalAllocated: snapshot.totalAllocated,
       unallocated: snapshot.unallocatedSavings,
       monthlyPace: Math.round(snapshot.monthlySavingPace),
+      paceReady: snapshot.savingsMovementCount > 0 && snapshot.savingsPaceDays >= 7,
       overAllocated: snapshot.unallocatedSavings < 0
     };
-  }, [snapshot.cushion.allocated, snapshot.goals, snapshot.totalSavings, snapshot.totalAllocated, snapshot.unallocatedSavings, snapshot.monthlySavingPace]);
+  }, [snapshot.cushion.allocated, snapshot.goals, snapshot.totalSavings, snapshot.totalAllocated, snapshot.unallocatedSavings, snapshot.monthlySavingPace, snapshot.savingsMovementCount, snapshot.savingsPaceDays]);
 
   const allocationBuckets: AllocationBucket[] = useMemo(() => {
     return [
@@ -1835,7 +1949,7 @@ export function SavingsScreen({
       },
       {
         id: "cushion",
-        label: "Подушка",
+        label: "Копилка",
         amount: Math.max(0, snapshot.cushion.allocated),
         tone: "ink"
       },
@@ -1882,11 +1996,13 @@ export function SavingsScreen({
   const forecastDateLabel = hasDeadline
     ? fmtDate(snapshot.primaryGoal!.goal.deadline!)
     : "+12 мес.";
+  const hasTrajectoryForecast = snapshot.savingsMovementCount > 0 && snapshot.savingsPaceDays >= 7;
   const trajectorySeries = buildPotTrajectorySeries({
     state,
     snapshot,
     forecastDate,
-    forecastNominal: Math.round(snapshot.savingsForecastNominal)
+    forecastNominal: Math.round(snapshot.savingsForecastNominal),
+    includeForecast: hasTrajectoryForecast
   });
   const trajectory: PotTrajectoryData = {
     points: trajectorySeries.points,
@@ -1894,7 +2010,8 @@ export function SavingsScreen({
     movementCount: trajectorySeries.movementCount,
     forecastReal: Math.round(snapshot.savingsForecastReal),
     forecastDateLabel,
-    hasDeadline
+    hasDeadline,
+    hasForecast: hasTrajectoryForecast
   };
 
   return (

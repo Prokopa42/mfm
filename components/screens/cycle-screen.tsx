@@ -17,21 +17,25 @@ import {
   addDays,
   compareDates,
   daysBetween,
+  getPaycheckSlotForDate,
   isAfterOrSame,
   isBeforeOrSame,
   isSameDate,
-  parseISODate
+  parseISODate,
+  toISODate
 } from "@/lib/dates";
 import type {
   CalculationSnapshot,
   Credit,
   CreditEvent,
   CreditEventKind,
+  ExpensePaymentSource,
   FinanceState,
   ISODate,
   MandatoryPayment,
   MandatoryPaymentRecurrence,
-  Rubric
+  Rubric,
+  SavingsGoal
 } from "@/lib/types";
 import { formatMoney, numberFromInput } from "@/lib/utils";
 
@@ -39,16 +43,21 @@ interface CycleScreenProps {
   state: FinanceState;
   snapshot: CalculationSnapshot;
   onAction: (action: ActionDialogKind) => void;
-  onMarkPaymentPaid: (payment: MandatoryPayment) => void;
+  onMarkPaymentPaid: (
+    payment: MandatoryPayment,
+    options?: { paymentSource?: ExpensePaymentSource; creditId?: string }
+  ) => void;
   onAddMandatoryPayment: (payment: Omit<MandatoryPayment, "id" | "status">) => void;
   onUpdateMandatoryPayment: (paymentId: string, payment: Omit<MandatoryPayment, "id" | "status">) => void;
   onDeleteMandatoryPayment: (paymentId: string) => void;
+  onSkipMandatoryPaymentOccurrence: (paymentId: string, date: ISODate) => void;
   onCancelMandatoryPayment: (payment: MandatoryPayment) => void;
   onSaveCredit: (credit: Omit<Credit, "id"> & { id?: string }) => void;
   onAddCreditEvent: (event: Omit<CreditEvent, "id">) => void;
   onDeleteCreditEvent: (eventId: string) => void;
   onToggleCreditClosed: (creditId: string, isClosed: boolean) => void;
   rubrics: Rubric[];
+  goals: SavingsGoal[];
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -72,6 +81,28 @@ const RU_MONTH_SHORT = [
 function fmtCycleDate(iso: ISODate) {
   const d = parseISODate(iso);
   return `${d.getDate()} ${RU_MONTH_SHORT[d.getMonth()]}`;
+}
+
+function normalizeISODate(date: ISODate): ISODate {
+  return date.slice(0, 10);
+}
+
+function monthKey(iso: ISODate) {
+  const d = parseISODate(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(iso: ISODate) {
+  const d = parseISODate(iso);
+  return `${RU_MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function addMonthsClamped(date: ISODate, months: number): ISODate {
+  const base = parseISODate(date);
+  const day = base.getDate();
+  const target = new Date(base.getFullYear(), base.getMonth() + months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  return toISODate(new Date(target.getFullYear(), target.getMonth(), Math.min(day, lastDay)));
 }
 
 function fmtTodayAxisLabel(iso: ISODate) {
@@ -103,16 +134,31 @@ const STATUS_LABEL: Record<HiFiStatus, string> = {
   counted: "Учтены в лимите"
 };
 
+const STATUS_HINT: Record<HiFiStatus, string> = {
+  paid: "уже списаны",
+  due: "сегодня или просрочены",
+  payday: "видны отдельно, лимит не режут до зарплаты",
+  counted: "до зарплаты, уже вычтены из свободных"
+};
+
+const STATUS_SHAPE: Record<HiFiStatus, "bar" | "tri" | "square" | "dot"> = {
+  paid: "bar",
+  due: "tri",
+  payday: "square",
+  counted: "dot"
+};
+
 /**
  * Map payment state into the hi-fi vocabulary used by Cycle.
  * Payday-date payments are visible before payday, but not counted in the
  * current pre-paycheck limit. On payday they become due.
  */
 function hifiStatus(payment: MandatoryPayment, today: ISODate, nextPaycheckDate: ISODate): HiFiStatus {
+  const dueDate = normalizeISODate(payment.dueDate);
   if (payment.status === "paid") return "paid";
   if (payment.status === "missed") return "due";
-  if (isSameDate(payment.dueDate, nextPaycheckDate) && compareDates(today, nextPaycheckDate) < 0) return "payday";
-  const diff = daysBetween(today, payment.dueDate);
+  if (isSameDate(dueDate, nextPaycheckDate) && compareDates(today, nextPaycheckDate) < 0) return "payday";
+  const diff = daysBetween(today, dueDate);
   if (diff <= 1) return "due";
   return "counted";
 }
@@ -124,6 +170,14 @@ function relativeDayLabel(dueDate: ISODate, today: ISODate): string {
   if (diff === 0) return "сегодня";
   if (diff === 1) return "завтра";
   return `через ${diff} дн.`;
+}
+
+function paymentWord(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return "платёж";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "платежа";
+  return "платежей";
 }
 
 function creditEventEffect(event: CreditEvent) {
@@ -479,18 +533,32 @@ function LegendItem({
 }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0, whiteSpace: "nowrap" }}>
-      <svg width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
-        {shape === "bar" && <line x1="3" y1="6" x2="9" y2="6" stroke={color} strokeWidth="1.5" />}
-        {shape === "tri" && <polygon points="3,8 9,8 6,3.5" fill={color} />}
-        {shape === "square" && (
-          <rect x="3.6" y="3.6" width="4.8" height="4.8" fill="none" stroke={color} strokeWidth="1.5" />
-        )}
-        {shape === "dot" && <circle cx="6" cy="6" r="2.7" fill="none" stroke={color} strokeWidth="1.5" />}
-      </svg>
+      <StatusGlyph shape={shape} color={color} />
       <span className="mono" style={{ fontSize: 7.3, color: "var(--ink-55)", letterSpacing: "0.02em" }}>
         {label}
       </span>
     </span>
+  );
+}
+
+function StatusGlyph({
+  shape,
+  color,
+  size = 12
+}: {
+  shape: "bar" | "tri" | "square" | "dot";
+  color: string;
+  size?: number;
+}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" style={{ display: "block", flex: "0 0 auto" }}>
+      {shape === "bar" && <line x1="3" y1="6" x2="9" y2="6" stroke={color} strokeWidth="1.7" />}
+      {shape === "tri" && <polygon points="3,8 9,8 6,3.5" fill={color} />}
+      {shape === "square" && (
+        <rect x="3.6" y="3.6" width="4.8" height="4.8" fill="none" stroke={color} strokeWidth="1.6" />
+      )}
+      {shape === "dot" && <circle cx="6" cy="6" r="2.7" fill="none" stroke={color} strokeWidth="1.6" />}
+    </svg>
   );
 }
 
@@ -504,6 +572,7 @@ function makeAxisLabelIndexes(totalDays: number) {
 // ─── NextPaymentCallout ──────────────────────────────────
 interface NextPaymentCalloutData {
   name: string;
+  detail?: string;
   dateLabel?: string;
   whenLabel?: string;
   amount?: number;
@@ -537,6 +606,11 @@ function NextPaymentCallout({ d }: { d: NextPaymentCalloutData }) {
             </span>
           )}
         </div>
+        {d.detail && (
+          <div className="mono" style={{ marginTop: 3, fontSize: 8.8, color: "var(--ink-55)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {d.detail}
+          </div>
+        )}
       </div>
       {!d.empty && typeof d.amount === "number" && (
         <div
@@ -568,8 +642,10 @@ interface MandatoryPaymentDialogProps {
   open: boolean;
   mode: PaymentDialogMode;
   payment?: MandatoryPayment;
+  draftPayment?: Partial<MandatoryPayment>;
   defaultDate: ISODate;
   rubrics: Rubric[];
+  goals: SavingsGoal[];
   credits: Credit[];
   creditEvents: CreditEvent[];
   onOpenChange: (open: boolean) => void;
@@ -581,8 +657,10 @@ function MandatoryPaymentDialog({
   open,
   mode,
   payment,
+  draftPayment,
   defaultDate,
   rubrics,
+  goals,
   credits,
   creditEvents,
   onOpenChange,
@@ -593,6 +671,7 @@ function MandatoryPaymentDialog({
   const [amount, setAmount] = useState("");
   const [dueDate, setDueDate] = useState(defaultDate);
   const [recurrence, setRecurrence] = useState<MandatoryPaymentRecurrence>("monthly");
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const rubricOptions = useMemo(
     () => {
@@ -618,35 +697,55 @@ function MandatoryPaymentDialog({
     [credits]
   );
   const [linkedCreditId, setLinkedCreditId] = useState<string>("");
+  const activeGoals = useMemo(
+    () =>
+      goals
+        .slice()
+        .sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title, "ru")),
+    [goals]
+  );
+  const [linkedGoalId, setLinkedGoalId] = useState<string>("");
 
   useEffect(() => {
     if (!open) return;
     setTitle(payment?.title ?? "");
-    setAmount(payment ? String(payment.amount) : "");
-    setDueDate(payment?.dueDate ?? defaultDate);
-    setRecurrence(payment?.recurrence ?? "monthly");
+    setAmount(payment ? String(payment.amount) : draftPayment?.amount ? String(draftPayment.amount) : "");
+    setTitle(payment?.title ?? draftPayment?.title ?? "");
+    setDueDate(payment?.dueDate ?? draftPayment?.dueDate ?? defaultDate);
+    setRecurrence(payment?.recurrence ?? draftPayment?.recurrence ?? "monthly");
+    setRecurrenceEndDate(payment?.recurrenceEndDate ?? draftPayment?.recurrenceEndDate ?? "");
     setDeleteConfirm(false);
     setCategoryId(
       payment?.categoryId && rubricOptions.some((rubric) => rubric.id === payment.categoryId)
         ? payment.categoryId
+        : draftPayment?.categoryId && rubricOptions.some((rubric) => rubric.id === draftPayment.categoryId)
+          ? draftPayment.categoryId
         : rubricOptions[0]?.id
     );
-    setLinkedCreditId(payment?.linkedCreditId ?? "");
-  }, [defaultDate, open, payment, rubricOptions]);
+    setLinkedCreditId(payment?.linkedCreditId ?? draftPayment?.linkedCreditId ?? "");
+    setLinkedGoalId(payment?.linkedGoalId ?? draftPayment?.linkedGoalId ?? "");
+  }, [defaultDate, draftPayment, open, payment, rubricOptions]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const cleanTitle = title.trim();
     const numericAmount = numberFromInput(amount);
     if (!cleanTitle || numericAmount <= 0 || !dueDate) return;
+    const nextLinkedCreditId = linkedCreditId && !linkedGoalId ? linkedCreditId : "";
+    const nextLinkedGoalId = linkedGoalId ? linkedGoalId : "";
 
     onSave({
       title: cleanTitle,
       amount: numericAmount,
       dueDate,
       recurrence,
+      recurrenceEndDate: recurrence === "monthly" && recurrenceEndDate ? recurrenceEndDate : undefined,
+      recurrenceExceptions: payment?.recurrenceExceptions,
+      sourceRecurringPaymentId: draftPayment?.sourceRecurringPaymentId,
+      sourceRecurringDate: draftPayment?.sourceRecurringDate,
       categoryId,
-      linkedCreditId: linkedCreditId || undefined
+      linkedCreditId: nextLinkedCreditId || undefined,
+      linkedGoalId: nextLinkedGoalId || undefined
     });
     onOpenChange(false);
   }
@@ -731,7 +830,10 @@ function MandatoryPaymentDialog({
               <select
                 id="cycle-payment-credit"
                 value={linkedCreditId}
-                onChange={(event) => setLinkedCreditId(event.currentTarget.value)}
+                onChange={(event) => {
+                  setLinkedCreditId(event.currentTarget.value);
+                  if (event.currentTarget.value) setLinkedGoalId("");
+                }}
                 style={{
                   width: "100%",
                   minHeight: 38,
@@ -752,9 +854,53 @@ function MandatoryPaymentDialog({
                 ))}
               </select>
             </DialogField>
+            <DialogField id="cycle-payment-goal" label="Цель накоплений">
+              <select
+                id="cycle-payment-goal"
+                value={linkedGoalId}
+                onChange={(event) => {
+                  setLinkedGoalId(event.currentTarget.value);
+                  if (event.currentTarget.value) setLinkedCreditId("");
+                }}
+                style={{
+                  width: "100%",
+                  minHeight: 38,
+                  border: "0.5px solid var(--ink-80)",
+                  borderRadius: 0,
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  padding: "0 8px",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11
+                }}
+              >
+                <option value="">Без связи с целью</option>
+                {activeGoals.map((goal) => (
+                  <option key={goal.id} value={goal.id}>
+                    {goal.title} · выделено {formatMoney(goal.allocated)} ₽
+                  </option>
+                ))}
+              </select>
+              <div className="mono" style={{ marginTop: 4, fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
+                При оплате своими деньгами сумма уйдёт в котёл и увеличит выделено по выбранной цели.
+              </div>
+            </DialogField>
             <DialogField id="cycle-payment-recurrence" label="Тип">
               <PaymentTypeControl value={recurrence} onChange={setRecurrence} />
             </DialogField>
+            {recurrence === "monthly" && (
+              <DialogField id="cycle-payment-recurrence-end" label="Повторять до">
+                <Input
+                  id="cycle-payment-recurrence-end"
+                  type="date"
+                  value={recurrenceEndDate}
+                  onChange={(event) => setRecurrenceEndDate(event.currentTarget.value)}
+                />
+                <div className="mono" style={{ marginTop: 4, fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
+                  Пусто — бессрочно. Дата задана — повторения только до этой даты включительно.
+                </div>
+              </DialogField>
+            )}
             {mode === "edit" && payment && payment.status !== "paid" && onDelete && (
               <div style={{ borderTop: "0.5px solid var(--hair)", paddingTop: 10 }}>
                 {!deleteConfirm ? (
@@ -780,7 +926,9 @@ function MandatoryPaymentDialog({
                 ) : (
                   <div style={{ display: "grid", gap: 8 }}>
                     <div className="mono" style={{ fontSize: 9.5, lineHeight: 1.45, color: "var(--ink-55)" }}>
-                      Удалить этот неоплаченный платёж? Он исчезнет из расчёта и списка. Деньги не изменятся.
+                    {payment.recurrence === "monthly"
+                      ? "Удалить всю серию неоплаченных ежемесячных платежей? Уже оплаченные платежи не переписываются."
+                      : "Удалить этот неоплаченный платёж? Он исчезнет из расчёта и списка. Деньги не изменятся."}
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                       <button
@@ -927,6 +1075,13 @@ function CancelPaymentDialog({
     if (payment) setRollbackCreditEvent(Boolean(linkedCreditEvent));
   }, [linkedCreditEvent, payment]);
 
+  const paidFromCredit = payment?.paidFrom === "credit";
+  const cancelText = payment
+    ? paidFromCredit
+      ? `Оперативный остаток не изменится. Долг по карте будет откатан, а платёж станет ${nextStatus}.`
+      : `Сумма ${formatMoney(payment.amount)} ₽ вернётся в оперативный остаток, а платёж станет ${nextStatus}.`
+    : "";
+
   return (
     <Dialog open={Boolean(payment)} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -940,7 +1095,7 @@ function CancelPaymentDialog({
           <>
             <DialogBody>
               <div className="mono" style={{ fontSize: 10, lineHeight: 1.5, color: "var(--ink-80)" }}>
-                Сумма {formatMoney(payment.amount)} ₽ вернётся в оперативный остаток, а платёж станет {nextStatus}.
+                {cancelText}
               </div>
               {linkedCreditEvent && (
                 <button
@@ -1054,7 +1209,15 @@ interface CycleSummaryData {
   discretionary: number;
 }
 
-function CycleSummary({ d }: { d: CycleSummaryData }) {
+type CycleInfoTopic = "paid" | "toPay" | "free";
+
+function CycleSummary({
+  d,
+  onExplain
+}: {
+  d: CycleSummaryData;
+  onExplain: (topic: CycleInfoTopic) => void;
+}) {
   return (
     <div
       style={{
@@ -1064,14 +1227,15 @@ function CycleSummary({ d }: { d: CycleSummaryData }) {
         border: "0.5px solid var(--ink-80)"
       }}
     >
-      <SummaryCell label="оплачено" value={d.paidSoFar} color="var(--ink-55)" />
+      <SummaryCell label="оплачено" value={d.paidSoFar} color="var(--ink-55)" onClick={() => onExplain("paid")} />
       <SummaryCell
         label="к оплате"
         value={d.remainingMandatory}
         color="var(--red)"
         divider
+        onClick={() => onExplain("toPay")}
       />
-      <SummaryCell label="свободные" value={d.discretionary} color="var(--blue)" divider />
+      <SummaryCell label="свободные" value={d.discretionary} color="var(--blue)" divider onClick={() => onExplain("free")} />
     </div>
   );
 }
@@ -1080,18 +1244,29 @@ function SummaryCell({
   label,
   value,
   color,
-  divider
+  divider,
+  onClick
 }: {
   label: string;
   value: number;
   color: string;
   divider?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
+      className="tap-highlight"
+      onClick={onClick}
       style={{
+        border: "none",
         padding: "7px 9px",
-        borderLeft: divider ? "0.5px solid var(--ink-80)" : "none"
+        borderLeft: divider ? "0.5px solid var(--ink-80)" : "none",
+        background: "transparent",
+        color: "var(--ink)",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        textAlign: "left"
       }}
     >
       <div className="eyebrow" style={{ fontSize: 8, marginBottom: 2 }}>
@@ -1104,7 +1279,80 @@ function SummaryCell({
       <span className="mono" style={{ fontSize: 8.5, color: "var(--ink-55)", marginLeft: 3 }}>
         ₽
       </span>
-    </div>
+    </button>
+  );
+}
+
+function CycleInfoDialog({
+  topic,
+  state,
+  snapshot,
+  summary,
+  onOpenChange
+}: {
+  topic: CycleInfoTopic | null;
+  state: FinanceState;
+  snapshot: CalculationSnapshot;
+  summary: CycleSummaryData;
+  onOpenChange: (open: boolean) => void;
+}) {
+  if (!topic) return null;
+
+  const plannedSavings = snapshot.plannedSavingsTransfersBeforeNextPaycheck;
+  const data: Record<CycleInfoTopic, { title: string; description: string; lines: string[] }> = {
+    paid: {
+      title: "Оплачено",
+      description: "Сумма обязательных платежей текущего цикла, которые уже отмечены как оплаченные.",
+      lines: [
+        `Оплачено в цикле: ${formatMoney(summary.paidSoFar)} ₽`,
+        "Эти платежи уже списаны и не считаются будущими обязательствами."
+      ]
+    },
+    toPay: {
+      title: "К оплате",
+      description: "Все неоплаченные обязательные платежи внутри текущего зарплатного цикла.",
+      lines: [
+        `К оплате в цикле: ${formatMoney(summary.remainingMandatory)} ₽`,
+        `Платежи до зарплаты, которые режут лимит: ${formatMoney(snapshot.mandatoryPaymentsBeforeNextPaycheck)} ₽`,
+        `Платежи в день зарплаты: ${formatMoney(snapshot.paydayMandatoryPaymentsTotal)} ₽`,
+        "Платежи в день зарплаты видны отдельно и не уменьшают текущий лимит до дня зарплаты."
+      ]
+    },
+    free: {
+      title: summary.discretionary < 0 ? "Почему денег не хватает" : "Останется до зарплаты",
+      description:
+        summary.discretionary < 0
+          ? "Это не долг. Это предупреждение: будущих обязательств больше, чем доступных денег."
+          : "Сколько останется после ближайших платежей, плановых накоплений и подушки.",
+      lines: [
+        `Оперативный остаток: ${formatMoney(state.operationalBalance)} ₽`,
+        `+ ожидаемые доходы до зарплаты: ${formatMoney(snapshot.incomeBeforeNextPaycheck)} ₽`,
+        `− платежи до зарплаты: ${formatMoney(snapshot.mandatoryPaymentsBeforeNextPaycheck)} ₽`,
+        `− подушка на сегодня: ${formatMoney(state.reserve.amount)} ₽`,
+        plannedSavings > 0 ? `− плановые переводы в накопления: ${formatMoney(plannedSavings)} ₽` : "− плановые переводы в накопления: 0 ₽",
+        `= останется до зарплаты: ${formatMoney(summary.discretionary)} ₽`,
+        "Настройка «учитывать сегодня в делителе» меняет дневной лимит, а не эту сумму."
+      ]
+    }
+  };
+  const current = data[topic];
+
+  return (
+    <Dialog open={Boolean(topic)} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{current.title}</DialogTitle>
+          <DialogDescription>{current.description}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="mono" style={{ display: "grid", gap: 7, fontSize: 9.5, lineHeight: 1.45, color: "var(--ink-80)" }}>
+            {current.lines.map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1156,7 +1404,7 @@ function PaymentsList({
       <PaymentGroup
         status="due"
         payments={due}
-        emptyText="нет срочных платежей"
+        emptyText="нет платежей на сегодня и просроченных"
         onPayPayment={onPayPayment}
         onEditPayment={onEditPayment}
         onCancelPayment={onCancelPayment}
@@ -1164,7 +1412,7 @@ function PaymentsList({
       <PaymentGroup
         status="counted"
         payments={counted}
-        emptyText="нет будущих платежей"
+        emptyText="нет будущих платежей до зарплаты, уже вычтенных из лимита"
         onPayPayment={onPayPayment}
         onEditPayment={onEditPayment}
         onCancelPayment={onCancelPayment}
@@ -1172,7 +1420,7 @@ function PaymentsList({
       <PaymentGroup
         status="payday"
         payments={payday}
-        emptyText="нет платежей в день зарплаты"
+        emptyText="нет платежей прямо в день зарплаты"
         onPayPayment={onPayPayment}
         onEditPayment={onEditPayment}
         onCancelPayment={onCancelPayment}
@@ -1181,7 +1429,7 @@ function PaymentsList({
         status="paid"
         payments={paid}
         muted
-        emptyText="пока нет оплаченных"
+        emptyText="пока нет оплаченных платежей"
         onPayPayment={onPayPayment}
         onEditPayment={onEditPayment}
         onCancelPayment={onCancelPayment}
@@ -1233,7 +1481,7 @@ function PaymentGroup({
         }}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-          <span style={{ width: 7, height: 7, border: `1px solid ${accent}`, background: STATUS_SOFT_BG[status] }} />
+          <StatusGlyph shape={STATUS_SHAPE[status]} color={accent} size={13} />
           <span
             className="mono"
             style={{
@@ -1244,6 +1492,9 @@ function PaymentGroup({
             }}
           >
             {STATUS_LABEL[status]}
+          </span>
+          <span className="mono" style={{ fontSize: 7.6, color: "var(--ink-35)" }}>
+            · {STATUS_HINT[status]}
           </span>
         </span>
         <span className="mono tnum" style={{ fontSize: 9, color: status === "paid" ? "var(--ink-80)" : accent }}>
@@ -1390,6 +1641,211 @@ function PaymentGroup({
   );
 }
 
+interface FuturePaymentOccurrence {
+  id: string;
+  paymentId: string;
+  payment: MandatoryPayment;
+  date: ISODate;
+  title: string;
+  amount: number;
+  status: MandatoryPayment["status"];
+  isPayday: boolean;
+  isRecurringOccurrence: boolean;
+}
+
+function buildSixMonthSchedule(
+  payments: MandatoryPayment[],
+  today: ISODate,
+  settings: FinanceState["settings"]
+) {
+  const horizon = addMonthsClamped(today, 6);
+  const occurrences: FuturePaymentOccurrence[] = [];
+
+  payments
+    .filter((payment) => payment.status !== "paid")
+    .forEach((payment) => {
+      const baseDate = normalizeISODate(payment.dueDate);
+      if (payment.recurrence === "once") {
+        if (isAfterOrSame(baseDate, today) && isBeforeOrSame(baseDate, horizon)) {
+          occurrences.push({
+            id: `${payment.id}:${baseDate}`,
+            paymentId: payment.id,
+            payment,
+            date: baseDate,
+            title: payment.title,
+            amount: payment.amount,
+            status: payment.status,
+            isPayday: Boolean(getPaycheckSlotForDate(baseDate, settings)),
+            isRecurringOccurrence: false
+          });
+        }
+        return;
+      }
+
+      let occurrenceDate = baseDate;
+      const exceptions = new Set(payment.recurrenceExceptions ?? []);
+      const recurrenceEndDate = payment.recurrenceEndDate ? normalizeISODate(payment.recurrenceEndDate) : undefined;
+      let guard = 0;
+      while (compareDates(occurrenceDate, today) < 0 && guard < 120) {
+        occurrenceDate = addMonthsClamped(occurrenceDate, 1);
+        guard += 1;
+      }
+
+      while (compareDates(occurrenceDate, horizon) <= 0 && guard < 140) {
+        if (compareDates(occurrenceDate, horizon) > 0) break;
+        if (!recurrenceEndDate || compareDates(occurrenceDate, recurrenceEndDate) <= 0) {
+          if (!exceptions.has(occurrenceDate)) {
+            occurrences.push({
+              id: `${payment.id}:${occurrenceDate}`,
+              paymentId: payment.id,
+              payment,
+              date: occurrenceDate,
+              title: payment.title,
+              amount: payment.amount,
+              status: payment.status,
+              isPayday: Boolean(getPaycheckSlotForDate(occurrenceDate, settings)),
+              isRecurringOccurrence: true
+            });
+          }
+        }
+        occurrenceDate = addMonthsClamped(occurrenceDate, 1);
+        guard += 1;
+      }
+    });
+
+  return occurrences.sort((a, b) => {
+    const byDate = compareDates(a.date, b.date);
+    return byDate !== 0 ? byDate : a.title.localeCompare(b.title, "ru");
+  });
+}
+
+function SixMonthPayments({
+  occurrences,
+  onEditOnce,
+  onEditSeries,
+  onEditOccurrence,
+  onSkipOccurrence
+}: {
+  occurrences: FuturePaymentOccurrence[];
+  onEditOnce: (payment: MandatoryPayment) => void;
+  onEditSeries: (payment: MandatoryPayment) => void;
+  onEditOccurrence: (occurrence: FuturePaymentOccurrence) => void;
+  onSkipOccurrence: (occurrence: FuturePaymentOccurrence) => void;
+}) {
+  const monthGroups = occurrences.reduce<Array<{ key: string; label: string; items: FuturePaymentOccurrence[] }>>(
+    (groups, occurrence) => {
+      const key = monthKey(occurrence.date);
+      const existing = groups.find((group) => group.key === key);
+      if (existing) {
+        existing.items.push(occurrence);
+      } else {
+        groups.push({ key, label: monthLabel(occurrence.date), items: [occurrence] });
+      }
+      return groups;
+    },
+    []
+  );
+
+  return (
+    <div style={{ padding: "8px var(--pad-x) 10px", borderTop: "0.5px solid var(--hair)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+        <span className="eyebrow eyebrow--ink">Ближайшие платежи</span>
+        <span className="mono tnum" style={{ fontSize: 9, color: "var(--ink-55)" }}>
+          6 мес. · {occurrences.length} шт
+        </span>
+      </div>
+      {monthGroups.length === 0 ? (
+        <div className="mono" style={{ borderTop: "1px solid var(--ink)", padding: "7px 0", fontSize: 9, color: "var(--ink-35)" }}>
+          запланированных платежей нет
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {monthGroups.map((group) => (
+            <div key={group.key} style={{ borderTop: "1px solid var(--ink)" }}>
+              <div className="mono" style={{ padding: "5px 0 4px", fontSize: 8.8, color: "var(--ink-55)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                {group.label}
+              </div>
+              {group.items.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "44px 1fr auto",
+                    gap: 8,
+                    alignItems: "baseline",
+                    padding: "4px 0",
+                    borderTop: "0.5px solid var(--hair)"
+                  }}
+                >
+                  <span className="mono tnum" style={{ fontSize: 9, color: "var(--ink-55)" }}>
+                    {fmtCycleDate(item.date)}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span className="slab" style={{ fontSize: 10.5 }}>
+                      {item.title}
+                    </span>
+                    <span className="mono" style={{ marginLeft: 6, fontSize: 8.5, color: item.isPayday ? "var(--ink)" : "var(--ink-55)" }}>
+                      · {item.status === "missed" ? "просрочен" : "запланирован"}
+                      {item.isPayday ? " · в день зарплаты" : ""}
+                    </span>
+                  </span>
+                  <span className="slab tnum" style={{ fontSize: 10.5 }}>
+                    {formatMoney(item.amount)} <span className="mono" style={{ fontSize: 8, color: "var(--ink-55)" }}>₽</span>
+                  </span>
+                  <div
+                    className="mono"
+                    style={{
+                      gridColumn: "2 / 4",
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 9,
+                      fontSize: 8.5,
+                      color: "var(--ink-55)"
+                    }}
+                  >
+                    {item.isRecurringOccurrence ? (
+                      <>
+                        <button type="button" className="tap-highlight mono" onClick={() => onEditOccurrence(item)} style={inlinePaymentActionStyle()}>
+                          изменить этот
+                        </button>
+                        <button type="button" className="tap-highlight mono" onClick={() => onSkipOccurrence(item)} style={inlinePaymentActionStyle("var(--red)")}>
+                          пропустить этот
+                        </button>
+                        <button type="button" className="tap-highlight mono" onClick={() => onEditSeries(item.payment)} style={inlinePaymentActionStyle()}>
+                          серия
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="tap-highlight mono" onClick={() => onEditOnce(item.payment)} style={inlinePaymentActionStyle()}>
+                        изменить / удалить
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function inlinePaymentActionStyle(color = "var(--ink-55)") {
+  return {
+    border: "none",
+    background: "transparent",
+    color,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 8.5,
+    padding: 0,
+    textDecoration: "underline",
+    textDecorationThickness: "0.5px",
+    textUnderlineOffset: 3
+  };
+}
+
 // ─── Credits registry ───────────────────────────────────
 type CreditDialogMode = "create" | "edit";
 
@@ -1413,6 +1869,7 @@ function CreditDialog({
   const [title, setTitle] = useState("");
   const [openedAt, setOpenedAt] = useState<ISODate>(new Date().toISOString().slice(0, 10) as ISODate);
   const [openingBalance, setOpeningBalance] = useState("");
+  const [creditLimit, setCreditLimit] = useState("");
   const [note, setNote] = useState("");
 
   useEffect(() => {
@@ -1420,6 +1877,7 @@ function CreditDialog({
     setTitle(credit?.title ?? "");
     setOpenedAt(credit?.openedAt ?? new Date().toISOString().slice(0, 10));
     setOpeningBalance(credit ? String(credit.openingBalance) : "");
+    setCreditLimit(credit?.creditLimit ? String(credit.creditLimit) : "");
     setNote(credit?.note ?? "");
   }, [credit, open]);
 
@@ -1427,6 +1885,7 @@ function CreditDialog({
     event.preventDefault();
     const cleanTitle = title.trim();
     const numericOpeningBalance = Math.max(0, numberFromInput(openingBalance));
+    const numericCreditLimit = Math.max(0, numberFromInput(creditLimit));
     if (!cleanTitle) return;
 
     onSave({
@@ -1434,6 +1893,7 @@ function CreditDialog({
       title: cleanTitle,
       openedAt,
       openingBalance: numericOpeningBalance,
+      creditLimit: numericCreditLimit > 0 ? numericCreditLimit : undefined,
       note: note.trim() || undefined,
       isClosed: credit?.isClosed ?? false,
       order: credit?.order ?? nextOrder
@@ -1447,7 +1907,7 @@ function CreditDialog({
         <DialogHeader>
           <DialogTitle>{mode === "edit" ? "Изменить кредит" : "Новый кредит"}</DialogTitle>
           <DialogDescription>
-            Это карточка обязательства. Текущий остаток считается от стартового долга и движений.
+            Это карточка долга. Покупка по кредитке увеличивает долг, платёж по кредиту уменьшает.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
@@ -1471,7 +1931,7 @@ function CreditDialog({
                 required
               />
             </DialogField>
-            <DialogField id="cycle-credit-opening-balance" label="Стартовый остаток">
+            <DialogField id="cycle-credit-opening-balance" label="Текущий долг на старте">
               <Input
                 id="cycle-credit-opening-balance"
                 value={openingBalance}
@@ -1479,6 +1939,15 @@ function CreditDialog({
                 inputMode="decimal"
                 placeholder="0"
                 required
+              />
+            </DialogField>
+            <DialogField id="cycle-credit-limit" label="Лимит карты">
+              <Input
+                id="cycle-credit-limit"
+                value={creditLimit}
+                onChange={(event) => setCreditLimit(event.currentTarget.value)}
+                inputMode="decimal"
+                placeholder="Необязательно"
               />
             </DialogField>
             <DialogField id="cycle-credit-note" label="Комментарий">
@@ -1490,7 +1959,7 @@ function CreditDialog({
               />
             </DialogField>
             <div className="mono" style={{ fontSize: 9, lineHeight: 1.45, color: "var(--ink-55)" }}>
-              Последующие изменения долга добавляются отдельными движениями. Общую денежную историю это не меняет.
+              Если по карте уже есть долг, внесите его здесь. Лимит нужен, чтобы видеть доступный остаток.
             </div>
           </DialogBody>
           <button
@@ -1517,144 +1986,131 @@ function CreditDialog({
   );
 }
 
-function CreditEventDialog({
-  credit,
-  open,
+function InsufficientPaymentDialog({
+  payment,
+  operationalBalance,
+  credits,
+  creditEvents,
   onOpenChange,
-  onSave
+  onPayFromCredit
 }: {
-  credit: Credit | null;
-  open: boolean;
+  payment: MandatoryPayment | null;
+  operationalBalance: number;
+  credits: Credit[];
+  creditEvents: CreditEvent[];
   onOpenChange: (open: boolean) => void;
-  onSave: (event: Omit<CreditEvent, "id">) => void;
+  onPayFromCredit: (payment: MandatoryPayment, creditId: string) => void;
 }) {
-  const [kind, setKind] = useState<CreditEventKind>("payment");
-  const [date, setDate] = useState<ISODate>(new Date().toISOString().slice(0, 10) as ISODate);
-  const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
+  const activeCredits = useMemo(
+    () =>
+      credits
+        .filter((credit) => !credit.isClosed && credit.id !== payment?.linkedCreditId)
+        .slice()
+        .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, "ru")),
+    [credits, payment?.linkedCreditId]
+  );
+  const [creditId, setCreditId] = useState("");
 
   useEffect(() => {
-    if (!open) return;
-    setKind("payment");
-    setDate(new Date().toISOString().slice(0, 10) as ISODate);
-    setAmount("");
-    setNote("");
-  }, [open]);
+    if (payment) setCreditId(activeCredits[0]?.id ?? "");
+  }, [activeCredits, payment]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!credit) return;
-    const numericAmount = kind === "adjustment"
-      ? numberFromInput(amount)
-      : Math.abs(numberFromInput(amount));
-    if (numericAmount === 0 || !date) return;
-
-    onSave({
-      creditId: credit.id,
-      date,
-      kind,
-      amount: numericAmount,
-      note: note.trim() || undefined
-    });
-    onOpenChange(false);
+    if (!payment || !creditId) return;
+    onPayFromCredit(payment, creditId);
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={Boolean(payment)} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Движение по кредиту</DialogTitle>
+          <DialogTitle>Недостаточно денег</DialogTitle>
           <DialogDescription>
-            Это меняет только остаток долга. Денежная история приложения не меняется.
+            Платёж не проведён. Оперативный остаток не должен уходить в минус без явного выбора кредитной карты.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <DialogBody>
-            <DialogField id="cycle-credit-event-kind" label="Тип движения">
-              <div
+        {payment && (
+          <form onSubmit={submit}>
+            <DialogBody>
+              <div className="mono" style={{ fontSize: 10, lineHeight: 1.5, color: "var(--ink-80)" }}>
+                Нужно {formatMoney(payment.amount)} ₽, в оперативном остатке {formatMoney(operationalBalance)} ₽.
+              </div>
+              {activeCredits.length > 0 ? (
+                <DialogField id="cycle-insufficient-credit" label="Списать с кредитной карты">
+                  <select
+                    id="cycle-insufficient-credit"
+                    value={creditId}
+                    onChange={(event) => setCreditId(event.currentTarget.value)}
+                    required
+                    style={{
+                      width: "100%",
+                      minHeight: 38,
+                      border: "0.5px solid var(--ink-80)",
+                      borderRadius: 0,
+                      background: "var(--paper)",
+                      color: "var(--ink)",
+                      padding: "0 8px",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11
+                    }}
+                  >
+                    {activeCredits.map((credit) => (
+                      <option key={credit.id} value={credit.id}>
+                        {credit.title} · долг {formatMoney(calculateCreditBalance(credit, creditEvents))} ₽
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mono" style={{ marginTop: 4, fontSize: 9, lineHeight: 1.45, color: "var(--ink-55)" }}>
+                    Оперативный остаток не изменится. Долг по выбранной карте увеличится на сумму платежа.
+                  </div>
+                </DialogField>
+              ) : (
+                <div className="mono" style={{ fontSize: 9.5, lineHeight: 1.45, color: "var(--red)" }}>
+                  Доступных кредитных карт нет. Добавьте кредит на вкладке «Цикл» или пополните оперативный остаток.
+                  Если это платёж по кредиту, нельзя списать его с той же карты.
+                </div>
+              )}
+            </DialogBody>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderTop: "0.5px solid var(--ink)" }}>
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className="tap-highlight"
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  border: "0.5px solid var(--ink-80)"
+                  padding: "12px 10px",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--ink)",
+                  cursor: "pointer",
+                  fontFamily: "inherit"
                 }}
               >
-                {(["charge", "payment", "adjustment"] as CreditEventKind[]).map((option, index) => {
-                  const selected = option === kind;
-                  return (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => setKind(option)}
-                      className="tap-highlight"
-                      style={{
-                        minWidth: 0,
-                        padding: "7px 4px",
-                        border: "none",
-                        borderLeft: index === 0 ? "none" : "0.5px solid var(--ink-80)",
-                        background: selected ? "var(--ink)" : "transparent",
-                        color: selected ? "var(--paper)" : "var(--ink-55)",
-                        cursor: "pointer",
-                        fontFamily: "inherit"
-                      }}
-                    >
-                      <span className="slab" style={{ fontSize: 8, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                        {creditEventLabel(option)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </DialogField>
-            <DialogField id="cycle-credit-event-date" label="Дата">
-              <Input
-                id="cycle-credit-event-date"
-                type="date"
-                value={date}
-                onChange={(event) => setDate(event.currentTarget.value as ISODate)}
-                required
-              />
-            </DialogField>
-            <DialogField id="cycle-credit-event-amount" label="Сумма">
-              <Input
-                id="cycle-credit-event-amount"
-                value={amount}
-                onChange={(event) => setAmount(event.currentTarget.value)}
-                inputMode="decimal"
-                placeholder={kind === "adjustment" ? "например -500 или 500" : "0"}
-                required
-              />
-            </DialogField>
-            <DialogField id="cycle-credit-event-note" label="Комментарий">
-              <Input
-                id="cycle-credit-event-note"
-                value={note}
-                onChange={(event) => setNote(event.currentTarget.value)}
-                placeholder="Что изменилось"
-              />
-            </DialogField>
-            <div className="mono" style={{ fontSize: 9, lineHeight: 1.45, color: "var(--ink-55)" }}>
-              Увеличение и платёж всегда вводятся положительной суммой. Корректировка может быть со знаком.
+                <span className="slab" style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  Отмена
+                </span>
+              </button>
+              <button
+                type="submit"
+                className="tap-highlight"
+                disabled={activeCredits.length === 0}
+                style={{
+                  padding: "12px 10px",
+                  border: "none",
+                  borderLeft: "0.5px solid var(--ink)",
+                  background: activeCredits.length === 0 ? "var(--ink-18)" : "var(--ink)",
+                  color: activeCredits.length === 0 ? "var(--ink-55)" : "var(--paper)",
+                  cursor: activeCredits.length === 0 ? "default" : "pointer",
+                  fontFamily: "inherit"
+                }}
+              >
+                <span className="slab" style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  Оплатить с карты
+                </span>
+              </button>
             </div>
-          </DialogBody>
-          <button
-            type="submit"
-            className="tap-highlight"
-            style={{
-              width: "100%",
-              padding: "13px 14px",
-              border: "none",
-              borderTop: "0.5px solid var(--ink)",
-              background: "var(--ink)",
-              color: "var(--paper)",
-              cursor: "pointer",
-              fontFamily: "inherit"
-            }}
-          >
-            <span className="slab" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Добавить движение
-            </span>
-          </button>
-        </form>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -1696,14 +2152,14 @@ function CreditPaymentBridgeDialog({
         <DialogHeader>
           <DialogTitle>Зачесть в кредит?</DialogTitle>
           <DialogDescription>
-            Платёж уже отмечен как оплаченный. Можно отдельно уменьшить остаток долга.
+            Платёж уже отмечен как оплаченный. Можно отдельно уменьшить долг по связанному кредиту.
           </DialogDescription>
         </DialogHeader>
         {payment && credit && (
           <form onSubmit={handleSubmit}>
             <DialogBody>
               <div className="mono" style={{ fontSize: 10, lineHeight: 1.5, color: "var(--ink-80)" }}>
-                {credit.title} · текущий остаток {formatMoney(creditBalance)} ₽ · дата события {fmtCycleDate(today)}.
+                {credit.title} · текущий долг {formatMoney(creditBalance)} ₽ · дата события {fmtCycleDate(today)}.
               </div>
               <DialogField id="cycle-credit-bridge-amount" label="Сумма зачёта">
                 <Input
@@ -1716,7 +2172,7 @@ function CreditPaymentBridgeDialog({
                 />
               </DialogField>
               <div className="mono" style={{ fontSize: 9, lineHeight: 1.45, color: "var(--ink-55)" }}>
-                По умолчанию: min(сумма платежа, остаток кредита). Нельзя зачесть больше текущего остатка.
+                По умолчанию: min(сумма платежа, текущий долг). Нельзя зачесть больше текущего долга.
               </div>
             </DialogBody>
             <div
@@ -1773,14 +2229,12 @@ function CreditsSection({
   creditEvents,
   onNewCredit,
   onEditCredit,
-  onNewEvent,
   onToggleClosed
 }: {
   credits: Credit[];
   creditEvents: CreditEvent[];
   onNewCredit: () => void;
   onEditCredit: (credit: Credit) => void;
-  onNewEvent: (credit: Credit) => void;
   onToggleClosed: (credit: Credit, isClosed: boolean) => void;
 }) {
   const [showClosed, setShowClosed] = useState(false);
@@ -1788,6 +2242,12 @@ function CreditsSection({
   const active = sortedCredits.filter((credit) => !credit.isClosed);
   const closed = sortedCredits.filter((credit) => credit.isClosed);
   const activeBalance = active.reduce((sum, credit) => sum + calculateCreditBalance(credit, creditEvents), 0);
+  const activeLimit = active.reduce((sum, credit) => sum + (credit.creditLimit ?? 0), 0);
+  const activeAvailableLimit = active.reduce((sum, credit) => {
+    if (!credit.creditLimit) return sum;
+    return sum + Math.max(0, credit.creditLimit - calculateCreditBalance(credit, creditEvents));
+  }, 0);
+  const activeLimitCards = active.filter((credit) => Boolean(credit.creditLimit)).length;
 
   return (
     <div style={{ padding: "8px var(--pad-x) 10px", borderTop: "0.5px solid var(--hair)" }}>
@@ -1803,7 +2263,7 @@ function CreditsSection({
         <div>
           <div className="eyebrow eyebrow--ink">Кредиты</div>
           <div className="mono" style={{ marginTop: 2, fontSize: 8.5, lineHeight: 1.35, color: "var(--ink-55)" }}>
-            Реестр обязательств. Платежи по ним ведутся отдельно.
+            Реестр долгов. Покупки по кредитке увеличивают долг, платежи по кредиту уменьшают.
           </div>
         </div>
         <button
@@ -1837,12 +2297,18 @@ function CreditsSection({
         }}
       >
         <span className="mono" style={{ fontSize: 8.5, color: "var(--red)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-          активные · {active.length}
+          активные долги · {active.length}
         </span>
         <span className="slab tnum" style={{ fontSize: 12.5, color: "var(--red)" }}>
           {formatMoney(activeBalance)} ₽
         </span>
       </div>
+      {activeLimitCards > 0 && (
+        <div className="mono" style={{ marginTop: -2, marginBottom: 7, fontSize: 8.8, color: "var(--ink-55)", lineHeight: 1.4 }}>
+          Доступный лимит: {formatMoney(activeAvailableLimit)} ₽ из {formatMoney(activeLimit)} ₽
+          {activeLimitCards < active.length ? " · у части карт лимит не задан" : ""}
+        </div>
+      )}
 
       <div style={{ display: "grid", gap: 6 }}>
         {active.length === 0 && (
@@ -1856,7 +2322,6 @@ function CreditsSection({
             credit={credit}
             events={creditEvents.filter((event) => event.creditId === credit.id)}
             onEdit={() => onEditCredit(credit)}
-            onNewEvent={() => onNewEvent(credit)}
             onToggle={() => onToggleClosed(credit, true)}
           />
         ))}
@@ -1895,7 +2360,6 @@ function CreditsSection({
                   events={creditEvents.filter((event) => event.creditId === credit.id)}
                   muted
                   onEdit={() => onEditCredit(credit)}
-                  onNewEvent={() => onNewEvent(credit)}
                   onToggle={() => onToggleClosed(credit, false)}
                 />
               ))}
@@ -1912,17 +2376,18 @@ function CreditRow({
   events,
   muted,
   onEdit,
-  onNewEvent,
   onToggle
 }: {
   credit: Credit;
   events: CreditEvent[];
   muted?: boolean;
   onEdit: () => void;
-  onNewEvent: () => void;
   onToggle: () => void;
 }) {
   const currentBalance = calculateCreditBalance(credit, events);
+  const limit = credit.creditLimit && credit.creditLimit > 0 ? credit.creditLimit : undefined;
+  const availableLimit = limit === undefined ? undefined : Math.max(0, limit - currentBalance);
+  const usedRatio = limit === undefined ? 0 : Math.min(1, currentBalance / limit);
   const sortedEvents = events.slice().sort((a, b) => {
     const byDate = compareDates(b.date, a.date);
     return byDate !== 0 ? byDate : b.id.localeCompare(a.id);
@@ -1976,28 +2441,6 @@ function CreditRow({
           >
             изменить
           </button>
-          {!credit.isClosed && (
-            <button
-              type="button"
-              onClick={onNewEvent}
-              className="tap-highlight mono"
-              style={{
-                flexShrink: 0,
-                border: "none",
-                background: "transparent",
-                color: "var(--ink-55)",
-                cursor: "pointer",
-                fontFamily: "inherit",
-                fontSize: 8.5,
-                padding: 0,
-                textDecoration: "underline",
-                textDecorationThickness: "0.5px",
-                textUnderlineOffset: 3
-              }}
-            >
-              движение
-            </button>
-          )}
           <button
             type="button"
             onClick={onToggle}
@@ -2019,7 +2462,6 @@ function CreditRow({
             {credit.isClosed ? "вернуть" : "закрыть"}
           </button>
         </div>
-        <CreditMiniTrend credit={credit} events={events} />
         <div
           className="mono"
           style={{
@@ -2031,9 +2473,33 @@ function CreditRow({
             whiteSpace: "nowrap"
           }}
         >
-          старт {formatMoney(credit.openingBalance)} ₽ · {fmtCycleDate(credit.openedAt)}
+          стартовый долг {formatMoney(credit.openingBalance)} ₽ · {fmtCycleDate(credit.openedAt)}
           {lastEvent ? ` · ${creditEventLabel(lastEvent.kind).toLowerCase()} ${formatMoney(Math.abs(lastEvent.amount))} ₽` : ""}
         </div>
+        <div className="mono" style={{ marginTop: 3, fontSize: 8.5, color: "var(--ink-55)", lineHeight: 1.35 }}>
+          {limit === undefined
+            ? "лимит карты не задан"
+            : `доступно ${formatMoney(availableLimit ?? 0)} ₽ из лимита ${formatMoney(limit)} ₽`}
+        </div>
+        {limit !== undefined && (
+          <div
+            aria-hidden
+            style={{
+              marginTop: 4,
+              width: "100%",
+              height: 3,
+              background: "var(--ink-18)"
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.round(usedRatio * 100)}%`,
+                height: "100%",
+                background: usedRatio > 0.85 ? "var(--red)" : "var(--blue)"
+              }}
+            />
+          </div>
+        )}
         {!credit.isClosed && currentBalance <= 0 && (
           <div className="mono" style={{ marginTop: 3, fontSize: 8.5, color: "var(--red)" }}>
             Остаток 0. Кредит можно закрыть вручную.
@@ -2069,55 +2535,6 @@ function CreditRow({
   );
 }
 
-function CreditMiniTrend({ credit, events }: { credit: Credit; events: CreditEvent[] }) {
-  const points = useMemo(() => {
-    const sorted = events.slice().sort((a, b) => compareDates(a.date, b.date) || a.id.localeCompare(b.id));
-    let balance = credit.openingBalance;
-    return [
-      { date: credit.openedAt, balance },
-      ...sorted.map((event) => {
-        balance = Math.max(0, balance + creditEventEffect(event));
-        return { date: event.date, balance };
-      })
-    ];
-  }, [credit.openedAt, credit.openingBalance, events]);
-
-  const W = 92;
-  const H = 18;
-  if (points.length < 2) {
-    return (
-      <div style={{ marginTop: 4, width: W, height: H, borderBottom: "0.5px solid var(--hair)" }} />
-    );
-  }
-
-  const min = Math.min(...points.map((point) => point.balance));
-  const max = Math.max(...points.map((point) => point.balance));
-  const span = Math.max(1, max - min);
-  const coords = points.map((point, index) => ({
-    x: (index / Math.max(1, points.length - 1)) * W,
-    y: H - 2 - ((point.balance - min) / span) * (H - 5)
-  }));
-  const path = coords
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
-    .join(" ");
-  const last = coords[coords.length - 1];
-  const balanceDelta = points[points.length - 1].balance - points[0].balance;
-  const trendColor =
-    Math.abs(balanceDelta) < 1
-      ? "var(--ink-55)"
-      : balanceDelta < 0
-        ? "var(--blue)"
-        : "var(--red)";
-
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-label="Тренд остатка кредита" style={{ display: "block", marginTop: 4 }}>
-      <line x1="0" y1={H - 2} x2={W} y2={H - 2} stroke="var(--hair)" strokeWidth="0.5" />
-      <path d={path} fill="none" stroke={trendColor} strokeWidth="1.2" />
-      <circle cx={last.x} cy={last.y} r="1.6" fill={trendColor} />
-    </svg>
-  );
-}
-
 // ─── Screen ──────────────────────────────────────────────
 export function CycleScreen({
   state,
@@ -2126,24 +2543,29 @@ export function CycleScreen({
   onAddMandatoryPayment,
   onUpdateMandatoryPayment,
   onDeleteMandatoryPayment,
+  onSkipMandatoryPaymentOccurrence,
   onCancelMandatoryPayment,
   onSaveCredit,
   onAddCreditEvent,
   onDeleteCreditEvent,
   onToggleCreditClosed,
-  rubrics
+  rubrics,
+  goals
 }: CycleScreenProps) {
   const [paymentDialog, setPaymentDialog] = useState<{
     mode: PaymentDialogMode;
     payment?: MandatoryPayment;
+    draftPayment?: Partial<MandatoryPayment>;
+    overrideSource?: { paymentId: string; date: ISODate };
   } | null>(null);
+  const [cycleInfoTopic, setCycleInfoTopic] = useState<CycleInfoTopic | null>(null);
   const [cancelPayment, setCancelPayment] = useState<MandatoryPayment | null>(null);
+  const [insufficientPayment, setInsufficientPayment] = useState<MandatoryPayment | null>(null);
+  const [creditBridgePayment, setCreditBridgePayment] = useState<MandatoryPayment | null>(null);
   const [creditDialog, setCreditDialog] = useState<{
     mode: CreditDialogMode;
     credit?: Credit;
   } | null>(null);
-  const [creditEventCredit, setCreditEventCredit] = useState<Credit | null>(null);
-  const [bridgePayment, setBridgePayment] = useState<MandatoryPayment | null>(null);
 
   // ─── Cycle window / day index ─────────────────────────
   const cycleStart = snapshot.previousPaycheckDate;
@@ -2169,6 +2591,7 @@ export function CycleScreen({
   // Includes paid ones (we want them visible in the "Оплачены" group +
   // as paid notches on the axis). Sort by due date asc.
   const cyclePayments = state.mandatoryPayments
+    .map((p) => ({ ...p, dueDate: normalizeISODate(p.dueDate) }))
     .filter((p) => isAfterOrSame(p.dueDate, cycleStart) && isBeforeOrSame(p.dueDate, cycleEnd))
     .sort((a, b) => compareDates(a.dueDate, b.dueDate))
     .map((p) => ({
@@ -2195,17 +2618,29 @@ export function CycleScreen({
   };
 
   // ─── Next payment callout ────────────────────────────
-  // Pick the first non-paid payment in the live cycle window. This includes
-  // missed/overdue payments, unlike upcoming-only lists.
+  // Pick the first non-paid payment date in the live cycle window. This
+  // includes missed/overdue payments, unlike upcoming-only lists, and keeps
+  // same-day payments together.
   const nextRaw = cyclePayments.find((p) => p.status !== "paid");
+  const nextPayments = nextRaw
+    ? cyclePayments.filter((payment) => payment.status !== "paid" && isSameDate(payment.dueDate, nextRaw.dueDate))
+    : [];
   const nextStatus = nextRaw ? hifiStatus(nextRaw, snapshot.today, snapshot.nextPaycheckDate) : null;
+  const nextAmount = nextPayments.reduce((sum, payment) => sum + payment.amount, 0);
+  const nextDetail = nextPayments.length > 1
+    ? nextPayments
+        .slice(0, 2)
+        .map((payment) => payment.title)
+        .join(", ") + (nextPayments.length > 2 ? "…" : "")
+    : undefined;
   const nextCallout: NextPaymentCalloutData =
     nextRaw && nextStatus
       ? {
-          name: nextRaw.title,
+          name: nextPayments.length > 1 ? `${nextPayments.length} ${paymentWord(nextPayments.length)}` : nextRaw.title,
+          detail: nextDetail,
           dateLabel: fmtCycleDate(nextRaw.dueDate),
           whenLabel: relativeDayLabel(nextRaw.dueDate, snapshot.today),
-          amount: nextRaw.amount,
+          amount: nextAmount,
           status: nextStatus
         }
       : {
@@ -2249,13 +2684,6 @@ export function CycleScreen({
   // handler, so snapshot recalculates through the normal app state path.
   const markPaymentTarget = nextRaw ?? null;
   const nextCreditOrder = Math.max(0, ...state.credits.map((credit) => credit.order)) + 10;
-  const bridgeCredit =
-    bridgePayment?.linkedCreditId
-      ? state.credits.find((credit) => credit.id === bridgePayment.linkedCreditId)
-      : undefined;
-  const bridgeCreditBalance = bridgeCredit
-    ? calculateCreditBalance(bridgeCredit, state.creditEvents)
-    : 0;
   const cancelLinkedCreditEvent = cancelPayment
     ? state.creditEvents.find(
         (event) =>
@@ -2263,20 +2691,28 @@ export function CycleScreen({
           event.linkedMandatoryPaymentId === cancelPayment.id
       )
     : undefined;
+  const bridgeCredit = creditBridgePayment?.linkedCreditId
+    ? state.credits.find((credit) => credit.id === creditBridgePayment.linkedCreditId && !credit.isClosed)
+    : undefined;
+  const bridgeCreditBalance = bridgeCredit
+    ? calculateCreditBalance(
+        bridgeCredit,
+        state.creditEvents.filter((event) => event.creditId === bridgeCredit.id)
+      )
+    : 0;
+  const sixMonthSchedule = buildSixMonthSchedule(state.mandatoryPayments, snapshot.today, state.settings);
 
-  function markMandatoryPaymentPaid(payment: MandatoryPayment) {
-    onMarkPaymentPaid(payment);
+  function markMandatoryPaymentPaid(
+    payment: MandatoryPayment,
+    options: { paymentSource?: ExpensePaymentSource; creditId?: string } = {}
+  ) {
+    const payFromCredit = options.paymentSource === "credit" && Boolean(options.creditId);
+    if (!payFromCredit && state.operationalBalance < payment.amount) {
+      setInsufficientPayment(payment);
+      return;
+    }
 
-    const credit = payment.linkedCreditId
-      ? state.credits.find((item) => item.id === payment.linkedCreditId)
-      : undefined;
-    const alreadyLinked = state.creditEvents.some(
-      (event) =>
-        event.kind === "payment" &&
-        event.linkedMandatoryPaymentId === payment.id
-    );
-    const balance = credit ? calculateCreditBalance(credit, state.creditEvents) : 0;
-    if (credit && balance > 0 && !alreadyLinked) setBridgePayment(payment);
+    onMarkPaymentPaid(payment, options);
   }
 
   return (
@@ -2292,7 +2728,7 @@ export function CycleScreen({
       <AvailableHero d={hero} />
       <FullCycleAxis d={axisData} />
       <NextPaymentCallout d={nextCallout} />
-      <CycleSummary d={summary} />
+      <CycleSummary d={summary} onExplain={setCycleInfoTopic} />
       <PaymentsList
         d={{
           payments: listPayments,
@@ -2319,8 +2755,36 @@ export function CycleScreen({
         creditEvents={state.creditEvents}
         onNewCredit={() => setCreditDialog({ mode: "create" })}
         onEditCredit={(credit) => setCreditDialog({ mode: "edit", credit })}
-        onNewEvent={setCreditEventCredit}
         onToggleClosed={(credit, isClosed) => onToggleCreditClosed(credit.id, isClosed)}
+      />
+      <SixMonthPayments
+        occurrences={sixMonthSchedule}
+        onEditOnce={(payment) => setPaymentDialog({ mode: "edit", payment })}
+        onEditSeries={(payment) => setPaymentDialog({ mode: "edit", payment })}
+        onEditOccurrence={(occurrence) =>
+          setPaymentDialog({
+            mode: "create",
+            draftPayment: {
+              title: occurrence.payment.title,
+              amount: occurrence.payment.amount,
+              dueDate: occurrence.date,
+              recurrence: "once",
+              categoryId: occurrence.payment.categoryId,
+              linkedCreditId: occurrence.payment.linkedCreditId,
+              linkedGoalId: occurrence.payment.linkedGoalId,
+              sourceRecurringPaymentId: occurrence.payment.id,
+              sourceRecurringDate: occurrence.date
+            },
+            overrideSource: {
+              paymentId: occurrence.payment.id,
+              date: occurrence.date
+            }
+          })
+        }
+        onSkipOccurrence={(occurrence) => {
+          const confirmed = window.confirm(`Пропустить платёж «${occurrence.title}» ${fmtCycleDate(occurrence.date)}?`);
+          if (confirmed) onSkipMandatoryPaymentOccurrence(occurrence.payment.id, occurrence.date);
+        }}
       />
 
       <div style={{ flex: 1, minHeight: 6 }} />
@@ -2355,8 +2819,10 @@ export function CycleScreen({
         open={Boolean(paymentDialog)}
         mode={paymentDialog?.mode ?? "create"}
         payment={paymentDialog?.payment}
+        draftPayment={paymentDialog?.draftPayment}
         defaultDate={snapshot.today}
         rubrics={rubrics}
+        goals={goals}
         credits={state.credits}
         creditEvents={state.creditEvents}
         onOpenChange={(open) => {
@@ -2365,6 +2831,9 @@ export function CycleScreen({
         onSave={(payment) => {
           if (paymentDialog?.mode === "edit" && paymentDialog.payment) {
             onUpdateMandatoryPayment(paymentDialog.payment.id, payment);
+          } else if (paymentDialog?.overrideSource) {
+            onSkipMandatoryPaymentOccurrence(paymentDialog.overrideSource.paymentId, paymentDialog.overrideSource.date);
+            onAddMandatoryPayment(payment);
           } else {
             onAddMandatoryPayment(payment);
           }
@@ -2395,38 +2864,46 @@ export function CycleScreen({
         }}
         onSave={onSaveCredit}
       />
-      <CreditEventDialog
-        credit={creditEventCredit}
-        open={Boolean(creditEventCredit)}
+      <InsufficientPaymentDialog
+        payment={insufficientPayment}
+        operationalBalance={state.operationalBalance}
+        credits={state.credits}
+        creditEvents={state.creditEvents}
         onOpenChange={(open) => {
-          if (!open) setCreditEventCredit(null);
+          if (!open) setInsufficientPayment(null);
         }}
-        onSave={onAddCreditEvent}
+        onPayFromCredit={(payment, creditId) => {
+          markMandatoryPaymentPaid(payment, { paymentSource: "credit", creditId });
+          setInsufficientPayment(null);
+        }}
       />
       <CreditPaymentBridgeDialog
-        payment={bridgePayment}
+        payment={creditBridgePayment}
         credit={bridgeCredit}
         creditBalance={bridgeCreditBalance}
         today={snapshot.today}
         onOpenChange={(open) => {
-          if (!open) setBridgePayment(null);
+          if (!open) setCreditBridgePayment(null);
         }}
         onConfirm={(amount) => {
-          if (!bridgePayment?.linkedCreditId) return;
-          const alreadyLinked = state.creditEvents.some(
-            (event) =>
-              event.kind === "payment" &&
-              event.linkedMandatoryPaymentId === bridgePayment.id
-          );
-          if (alreadyLinked) return;
+          if (!creditBridgePayment || !bridgeCredit) return;
           onAddCreditEvent({
-            creditId: bridgePayment.linkedCreditId,
+            creditId: bridgeCredit.id,
             date: snapshot.today,
             kind: "payment",
-            amount: Math.min(amount, bridgeCreditBalance),
-            note: `Зачтено из платежа: ${bridgePayment.title}`,
-            linkedMandatoryPaymentId: bridgePayment.id
+            amount,
+            note: `Зачёт обязательного платежа: ${creditBridgePayment.title}`,
+            linkedMandatoryPaymentId: creditBridgePayment.id
           });
+        }}
+      />
+      <CycleInfoDialog
+        topic={cycleInfoTopic}
+        state={state}
+        snapshot={snapshot}
+        summary={summary}
+        onOpenChange={(open) => {
+          if (!open) setCycleInfoTopic(null);
         }}
       />
     </div>

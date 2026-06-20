@@ -1,20 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ActionDialogKind } from "@/components/action-dialogs";
-import { Banner, CTARow, Glyph, HeroNumber, InlineNumber } from "@/components/mfm-ui";
+import type { DailyCheckDialogMode } from "@/components/daily-check-dialog";
+import { Banner, Glyph, HeroNumber, InlineNumber } from "@/components/mfm-ui";
 import { Button } from "@/components/ui/button";
-import { stateLabel, stateText } from "@/lib/calculations";
 import {
-  addDays,
-  daysBetween,
-  formatShortDate,
-  isAfterOrSame,
-  isBeforeOrSame,
-  parseISODate
-} from "@/lib/dates";
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import { getDailyCheck, stateLabel, stateText } from "@/lib/calculations";
+import { addDays, daysBetween, formatShortDate, parseISODate } from "@/lib/dates";
 import type {
   CalculationSnapshot,
+  DailyCheck,
+  DailyCheckReason,
   FinanceState,
   InterfaceState,
   MandatoryPayment
@@ -25,6 +29,8 @@ interface TodayScreenProps {
   state: FinanceState;
   snapshot: CalculationSnapshot;
   onAction: (action: ActionDialogKind) => void;
+  onDailyCheck: (mode: DailyCheckDialogMode) => void;
+  onQuickExpense: () => void;
   onConfirmPaycheck: () => void;
 }
 
@@ -34,7 +40,19 @@ const RU_MONTH_SHORT = [
   "июл", "авг", "сен", "окт", "ноя", "дек"
 ];
 
-type BannerKind = "warning" | "info" | "notice" | "success";
+const REASON_LABELS: Record<DailyCheckReason, string> = {
+  food: "еда",
+  transport: "транспорт",
+  family: "семья",
+  health: "здоровье",
+  work: "работа",
+  "force-majeure": "форс-мажор",
+  extra: "лишнее",
+  unknown: "неясно",
+  other: "другое"
+};
+
+type TodayInfoTopic = "spent" | "free" | "reserve" | "pace" | "operational" | "savings";
 
 function dateBits(iso: string) {
   const d = parseISODate(iso);
@@ -45,7 +63,7 @@ function dateBits(iso: string) {
   };
 }
 
-function stateToBannerKind(state: InterfaceState): BannerKind | null {
+function stateToBannerKind(state: InterfaceState): "warning" | "info" | "notice" | "success" | null {
   switch (state) {
     case "tight":
       return "notice";
@@ -60,37 +78,55 @@ function stateToBannerKind(state: InterfaceState): BannerKind | null {
   }
 }
 
-function Section({
-  children,
-  compact = false,
-  topLine = "var(--line-hair) solid var(--hair)",
-  bottomLine = "none"
-}: {
-  children: React.ReactNode;
-  compact?: boolean;
-  topLine?: string;
-  bottomLine?: string;
-}) {
-  return (
-    <section
-      style={{
-        padding: compact ? "8px var(--pad-x)" : "10px var(--pad-x)",
-        borderTop: topLine,
-        borderBottom: bottomLine
-      }}
-    >
-      {children}
-    </section>
-  );
+function dailyStatusText(check?: DailyCheck) {
+  if (!check?.morningBalance && check?.morningBalance !== 0) {
+    return {
+      title: "Утро не внесено",
+      note: "Утренний остаток ещё не зафиксирован. Введите остаток, чтобы рассчитать день.",
+      kind: "notice" as const
+    };
+  }
+  if (check.eveningBalance === undefined) {
+    if (((check.quickSpentAmount ?? 0) > 0 || (check.creditSpentAmount ?? 0) > 0) && check.calculatedEveningBalance !== undefined) {
+      return {
+        title: check.status === "ok" ? "День идёт в лимите" : "Есть отклонение",
+        note: `Расчётный вечерний остаток ${formatMoney(check.calculatedEveningBalance)} ₽. Ручной вечер всё ещё можно внести.`,
+        kind: check.status === "risk" ? "warning" as const : "info" as const
+      };
+    }
+    return {
+      title: "План дня зафиксирован",
+      note: "Вечером внесите остаток, чтобы закрыть день.",
+      kind: "info" as const
+    };
+  }
+  if (check.status === "ok") {
+    return {
+      title: "День закрыт в лимите",
+      note: "Факт дня не вышел за безопасный дневной маршрут.",
+      kind: "success" as const
+    };
+  }
+  if (check.status === "warning") {
+    return {
+      title: "Есть отклонение от лимита",
+      note: "Перерасход будет распределён на оставшиеся дни цикла.",
+      kind: "notice" as const
+    };
+  }
+  return {
+    title: "Риск по маршруту",
+    note: "Факт дня сильно выше плана. Проверьте обязательства до зарплаты.",
+    kind: "warning" as const
+  };
 }
 
-function Header({
-  date,
-  daysToPaycheck
-}: {
-  date: ReturnType<typeof dateBits>;
-  daysToPaycheck: number;
-}) {
+function percentOf(total: number, value: number) {
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, (value / total) * 100));
+}
+
+function Header({ date, daysToPaycheck }: { date: ReturnType<typeof dateBits>; daysToPaycheck: number }) {
   return (
     <div
       style={{
@@ -127,25 +163,24 @@ function Header({
 
 function Hero({
   safeToday,
-  freeUntilPaycheck,
-  remainingDays,
-  tomorrow
+  operationalBalance,
+  availableUntilPaycheck,
+  remainingDays
 }: {
   safeToday: number;
-  freeUntilPaycheck: number;
+  operationalBalance: number;
+  availableUntilPaycheck: number;
   remainingDays: number;
-  tomorrow: number;
 }) {
-  const tickValue = Math.round(safeToday / 100) * 100;
-  const delta = Math.max(0, Math.round(tomorrow - safeToday));
-  const freeUntilLabel =
-    freeUntilPaycheck < 0
-      ? `до безопасного минимума не хватает ${formatMoney(Math.abs(freeUntilPaycheck))} ₽`
-      : `до зарплаты ${formatMoney(freeUntilPaycheck)} ₽`;
+  const availableText =
+    availableUntilPaycheck < 0
+      ? `до безопасного минимума не хватает ${formatMoney(Math.abs(availableUntilPaycheck))} ₽`
+      : `до зарплаты свободно ${formatMoney(availableUntilPaycheck)} ₽`;
+
   return (
-    <div
+    <section
       style={{
-        padding: "20px var(--pad-x) 14px",
+        padding: "18px var(--pad-x) 14px",
         display: "grid",
         gridTemplateColumns: "3px 1fr",
         gap: 14,
@@ -154,494 +189,394 @@ function Hero({
     >
       <div style={{ background: "var(--yellow)" }} />
       <div>
-        <div className="eyebrow">Можно потратить сегодня</div>
-        <div style={{ marginTop: 9 }}>
+        <div className="eyebrow">Можно сегодня</div>
+        <div style={{ marginTop: 8 }}>
           <HeroNumber value={formatMoney(safeToday)} />
         </div>
         <div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 36, height: 1, background: "var(--ink)" }} />
           <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-55)" }}>
-            ≈ {formatMoney(tickValue)} ₽/день
+            оперативный остаток {formatMoney(operationalBalance)} ₽
           </span>
         </div>
-        <div
-          className="mono"
-          style={{ marginTop: 8, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.35 }}
-        >
-          {freeUntilLabel} · {remainingDays} дн.
-        </div>
-        <div style={{ marginTop: 18, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-          <span className="eyebrow eyebrow--ink">если не трачу — завтра</span>
-          <InlineNumber value={formatMoney(tomorrow)} size={15} />
-          {delta > 0 && (
-            <span className="mono" style={{ fontSize: 9, color: "var(--ink-35)" }}>
-              +{formatMoney(delta)}
-            </span>
-          )}
+        <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.35 }}>
+          {availableText} · {remainingDays} дн.
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
-function FormulaDisclosure({
+function FormulaPanel({
   state,
-  snapshot,
-  safeToday
+  snapshot
 }: {
   state: FinanceState;
   snapshot: CalculationSnapshot;
-  safeToday: number;
 }) {
-  const [open, setOpen] = useState(false);
-  const hasSafeMinimumDeficit = snapshot.availableUntilNextPaycheck < 0;
   return (
-    <Section compact>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="tap-highlight"
-        style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: 0,
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          fontFamily: "inherit"
-        }}
-      >
-        <Glyph shape="triangle" fill="var(--ink-55)" size={6} />
+    <section style={{ padding: "6px var(--pad-x) 8px", borderTop: "1px solid var(--hair)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
         <span className="eyebrow">Как считается</span>
         <div style={{ flex: 1, height: 0.5, background: "var(--hair)" }} />
-        <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>
-          {open ? "свернуть" : "формула"}
+        <span className="mono" style={{ fontSize: 8.8, color: "var(--ink-55)" }}>
+          формула
         </span>
-      </button>
-      {open && (
-        <div style={{ paddingTop: 8 }}>
-          <FormulaRow sign="+" label="Оперативный остаток" value={state.operationalBalance} />
-          {snapshot.incomeBeforeNextPaycheck > 0 && (
-            <FormulaRow sign="+" label="Ожидаемые доходы" value={snapshot.incomeBeforeNextPaycheck} />
-          )}
-          <FormulaRow
-            sign="−"
-            label="Обязательные платежи"
-            value={snapshot.mandatoryPaymentsBeforeNextPaycheck}
-          />
-          {snapshot.paydayMandatoryPaymentsTotal > 0 && (
-            <FormulaRow
-              sign="•"
-              label="В день зарплаты · не вычтено"
-              value={snapshot.paydayMandatoryPaymentsTotal}
-            />
-          )}
-          <FormulaRow sign="−" label="Подушка" value={state.reserve.amount} />
-          {snapshot.plannedSavingsTransfersBeforeNextPaycheck > 0 && (
-            <FormulaRow
-              sign="−"
-              label="Плановые переводы"
-              value={snapshot.plannedSavingsTransfersBeforeNextPaycheck}
-            />
-          )}
-          <FormulaRow
-            sign="="
-            label={hasSafeMinimumDeficit ? "До безопасного минимума не хватает" : "Свободно до зарплаты"}
-            value={hasSafeMinimumDeficit ? Math.abs(snapshot.availableUntilNextPaycheck) : snapshot.availableUntilNextPaycheck}
-            strong
-          />
-          <FormulaRow sign="÷" label="Осталось дней" value={snapshot.remainingDays} numberOnly />
-          <FormulaRow sign="=" label="Можно потратить сегодня" value={safeToday} strong />
-        </div>
-      )}
-    </Section>
-  );
-}
-
-function FormulaRow({
-  sign,
-  label,
-  value,
-  strong = false,
-  numberOnly = false
-}: {
-  sign: string;
-  label: string;
-  value: number;
-  strong?: boolean;
-  numberOnly?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "baseline",
-        gap: 8,
-        padding: strong ? "6px 0 2px" : "3px 0",
-        borderTop: strong ? "0.5px solid var(--ink-80)" : "none"
-      }}
-    >
-      <span className="mono" style={{ width: 12, fontSize: 10, color: "var(--ink-55)" }}>
-        {sign}
-      </span>
-      <span
-        className={strong ? "slab" : "mono"}
-        style={{
-          flex: 1,
-          fontSize: strong ? 10 : 10,
-          color: strong ? "var(--ink)" : "var(--ink-80)",
-          textTransform: strong ? "uppercase" : "none",
-          letterSpacing: strong ? "0.04em" : 0
-        }}
-      >
-        {label}
-      </span>
-      <span className={strong ? "slab tnum" : "mono tnum"} style={{ fontSize: strong ? 11 : 10 }}>
-        {formatMoney(value)}
-        {!numberOnly && (
-          <span className="mono" style={{ fontSize: 8.5, color: "var(--ink-55)" }}>
-            {" "}
-            ₽
-          </span>
-        )}
-      </span>
-    </div>
+      </div>
+      <div className="mono" style={{ marginTop: 6, fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
+        Оперативный {formatMoney(state.operationalBalance)} ₽ − платежи до зарплаты{" "}
+        {formatMoney(snapshot.mandatoryPaymentsBeforeNextPaycheck)} ₽ − подушка {formatMoney(state.reserve.amount)} ₽
+        {snapshot.plannedSavingsTransfersBeforeNextPaycheck > 0
+          ? ` − план в накопления ${formatMoney(snapshot.plannedSavingsTransfersBeforeNextPaycheck)} ₽`
+          : ""}
+      </div>
+    </section>
   );
 }
 
 function BalanceStrip({
   spent,
   free,
-  cushion
+  reserve,
+  onExplain
 }: {
   spent: number;
   free: number;
-  cushion: number;
+  reserve: number;
+  onExplain: (topic: TodayInfoTopic) => void;
 }) {
-  const total = Math.max(1, spent + free + cushion);
-  const spentPct = (spent / total) * 100;
-  const freePct = (free / total) * 100;
-  const cushionPct = (cushion / total) * 100;
+  const total = Math.max(1, spent + Math.max(0, free) + reserve);
+  const spentPct = percentOf(total, spent);
+  const reservePct = percentOf(total, reserve);
+  const freePct = Math.max(0, 100 - spentPct - reservePct);
+  const reserveDominates = Math.max(0, free) <= 0 && reserve > 0;
 
   return (
-    <Section>
-      <div style={{ display: "flex", height: 5, border: "0.5px solid var(--ink)" }}>
+    <section style={{ padding: "8px var(--pad-x) 10px", borderTop: "0.5px solid var(--hair)" }}>
+      <div style={{ height: 7, display: "flex", border: "0.5px solid var(--ink)" }}>
         <div style={{ width: `${spentPct}%`, background: "var(--ink)" }} />
-        <div
-          style={{
-            width: `${freePct}%`,
-            borderLeft: "0.5px solid var(--ink)",
-            borderRight: "0.5px solid var(--ink)"
-          }}
-        />
-        <div style={{ width: `${cushionPct}%`, background: "var(--yellow-bg)" }} />
+        <div style={{ width: `${freePct}%`, background: "transparent" }} />
+        <div style={{ width: `${reservePct}%`, background: "var(--yellow)" }} />
       </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          gap: 8,
-          paddingTop: 7
-        }}
-      >
-        <BalanceCell label="потрачено" value={spent} align="start" />
-        <BalanceCell label="свободно" value={free} align="center" />
-        <BalanceCell label="подушка" value={cushion} align="end" color="var(--ink)" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", marginTop: 7, gap: 8 }}>
+        <MiniMetric label="потрачено" value={spent} onClick={() => onExplain("spent")} />
+        <MiniMetric label="свободно" value={Math.max(0, free)} onClick={() => onExplain("free")} />
+        <MiniMetric label="подушка" value={reserve} onClick={() => onExplain("reserve")} />
       </div>
-    </Section>
-  );
-}
-
-function BalanceCell({
-  label,
-  value,
-  align,
-  color = "var(--ink)"
-}: {
-  label: string;
-  value: number;
-  align: "start" | "center" | "end";
-  color?: string;
-}) {
-  const alignItems =
-    align === "start" ? "flex-start" : align === "center" ? "center" : "flex-end";
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems }}>
-      <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>
-        {label}
-      </span>
-      <span className="slab tnum" style={{ fontSize: 12, color }}>
-        {formatMoney(value)}
-      </span>
-    </div>
-  );
-}
-
-function PaceLine({
-  pace,
-  forecast,
-  current,
-  date,
-  ok,
-  delta
-}: {
-  pace: number;
-  forecast: number;
-  current: number;
-  date: string;
-  ok: boolean;
-  delta?: number;
-}) {
-  const color = ok ? "var(--blue)" : "var(--red)";
-  return (
-    <Section
-      topLine="var(--line-heavy) solid var(--hair)"
-      bottomLine="var(--line-heavy) solid var(--hair)"
-    >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "2px auto auto minmax(120px, 1fr) auto",
-          alignItems: "baseline",
-          gap: 8,
-          minWidth: 0
-        }}
-      >
-        <div style={{ width: 2, height: 15, background: color, alignSelf: "center" }} />
-        <span className="eyebrow">средний темп</span>
-        <span className="slab tnum" style={{ fontSize: 13, color: "var(--ink)" }}>
-          {pace >= 0 ? "+" : "−"}
-          {formatMoney(Math.abs(pace))}
-          <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>
-            {" "}
-            ₽/мес
-          </span>
-        </span>
-        <ForecastLine current={current} forecast={forecast} color={color} />
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-          <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>
-            к {date}
-          </span>
-          <span className="slab tnum" style={{ color, fontSize: 13 }}>
-            {formatMoney(forecast)} ₽
-          </span>
+      {reserveDominates && (
+        <div className="mono" style={{ marginTop: 7, fontSize: 8.5, lineHeight: 1.35, color: "var(--ink-55)" }}>
+          Жёлтый сегмент — подушка на сегодня. Это часть оперативных денег, которую лучше не трогать.
         </div>
-      </div>
-      <div style={{ paddingTop: ok || delta === undefined || delta === 0 ? 0 : 6 }}>
-        {!ok && delta !== undefined && delta !== 0 && (
-          <div
-            className="mono tnum"
-            style={{ textAlign: "right", fontSize: 9.5, color: "var(--red)" }}
-          >
-            {delta < 0 ? "−" : "+"}
-            {formatMoney(Math.abs(delta))} к цели
-          </div>
+      )}
+    </section>
+  );
+}
+
+function PaceRow({ snapshot, onExplain }: { snapshot: CalculationSnapshot; onExplain: (topic: TodayInfoTopic) => void }) {
+  const pace = Math.round(snapshot.monthlySavingPace);
+  const hasEnoughHistory = snapshot.savingsMovementCount > 0 && snapshot.savingsPaceDays >= 7;
+  return (
+    <button
+      type="button"
+      className="tap-highlight"
+      onClick={() => onExplain("pace")}
+      style={{
+        width: "100%",
+        padding: "8px var(--pad-x)",
+        display: "grid",
+        gridTemplateColumns: "3px auto 1fr auto",
+        gap: 9,
+        alignItems: "center",
+        borderTop: "1.5px solid var(--hair)",
+        borderRight: "none",
+        borderBottom: "1px solid var(--hair)",
+        borderLeft: "none",
+        background: "transparent",
+        color: "var(--ink)",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        textAlign: "left"
+      }}
+    >
+      <div style={{ width: 2, height: 16, background: hasEnoughHistory ? (pace >= 0 ? "var(--blue)" : "var(--red)") : "var(--ink-35)" }} />
+      <span className="eyebrow">Темп</span>
+      <span className="slab tnum" style={{ fontSize: 12, color: hasEnoughHistory ? (pace >= 0 ? "var(--ink)" : "var(--red)") : "var(--ink-55)" }}>
+        {hasEnoughHistory ? (
+          <>
+            {pace >= 0 ? "+" : "−"}
+            {formatMoney(Math.abs(pace))} <span className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>₽/мес</span>
+          </>
+        ) : (
+          "данных мало"
         )}
-      </div>
-    </Section>
+      </span>
+      <span className="mono tnum" style={{ fontSize: 9.5, color: "var(--ink-55)" }}>
+        {hasEnoughHistory ? (
+          <>
+            к +12 мес. <span className="slab" style={{ color: "var(--blue)", fontSize: 12 }}>{formatMoney(Math.round(snapshot.savingsForecastNominal))} ₽</span>
+          </>
+        ) : snapshot.savingsMovementCount > 0 ? (
+          "нужна неделя движений"
+        ) : (
+          "нет переводов / снятий"
+        )}
+      </span>
+    </button>
   );
 }
 
-function ForecastLine({
-  current,
-  forecast,
-  color
+function TodayCycleAxis({
+  snapshot
 }: {
-  current: number;
-  forecast: number;
-  color: string;
+  snapshot: CalculationSnapshot;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(120);
-  const width = Math.max(120, containerWidth);
-  const height = 18;
-  const pad = 2;
-  const steps = 5;
-  const values = Array.from({ length: steps + 1 }, (_, index) =>
-    current + ((forecast - current) * index) / steps
-  );
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(1, max - min);
-  const points = values
-    .map((value, index) => {
-      const x = pad + ((width - pad * 2) * index) / steps;
-      const y =
-        max === min
-          ? height / 2
-          : height - pad - ((height - pad * 2) * (value - min)) / range;
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
-
-    const updateWidth = () => {
-      const nextWidth = Math.round(element.clientWidth);
-      if (nextWidth > 0) setContainerWidth(nextWidth);
-    };
-
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
+  const totalDays = Math.max(1, daysBetween(snapshot.previousPaycheckDate, snapshot.nextPaycheckDate));
+  const todayIdx = Math.max(0, Math.min(totalDays, daysBetween(snapshot.previousPaycheckDate, snapshot.today)));
+  const labels = Array.from(new Set([0, Math.ceil(totalDays / 4), Math.ceil(totalDays / 2), Math.ceil((totalDays * 3) / 4), totalDays]))
+    .filter((idx) => idx >= 0 && idx <= totalDays)
+    .sort((a, b) => a - b);
 
   return (
-    <div ref={containerRef} style={{ width: "100%", minWidth: 0, alignSelf: "center" }}>
-      <svg
-        width={width}
-        height={height}
-        viewBox={`0 0 ${width} ${height}`}
-        aria-label="Прогноз темпа накоплений"
-        role="img"
-        style={{ display: "block" }}
-      >
-        <title>Прогноз: от текущих накоплений по среднему темпу котла</title>
-        <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="var(--hair)" strokeWidth="0.7" />
-        <polyline points={points} fill="none" stroke={color} strokeWidth="1.2" />
-      </svg>
-    </div>
-  );
-}
-
-function CycleMini({
-  startDate,
-  endDate,
-  today,
-  payments
-}: {
-  startDate: string;
-  endDate: string;
-  today: string;
-  payments: { date: string; nearest: boolean; missed: boolean }[];
-}) {
-  const cycleDays = Math.max(1, daysBetween(startDate, endDate) + 1);
-  const todayIdx = Math.max(0, Math.min(cycleDays - 1, daysBetween(startDate, today)));
-  const pct = (idx: number) => `${((Math.max(0, Math.min(cycleDays - 1, idx)) + 0.5) / cycleDays) * 100}%`;
-  const tickStep = Math.max(1, Math.ceil((cycleDays - 1) / 5));
-  const tickIndexes = Array.from({ length: cycleDays }, (_, index) => index).filter(
-    (index) => index === 0 || index === cycleDays - 1 || index % tickStep === 0
-  );
-  const visiblePayments = payments
-    .filter((payment) => isAfterOrSame(payment.date, startDate))
-    .filter((payment) => isBeforeOrSame(payment.date, endDate));
-
-  return (
-    <Section topLine="none" bottomLine="var(--line-heavy) solid var(--hair)">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 7 }}>
+    <section style={{ padding: "8px var(--pad-x) 10px", borderBottom: "1.5px solid var(--hair)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
         <span className="eyebrow eyebrow--ink">Цикл</span>
         <div style={{ flex: 1, height: 0.5, background: "var(--hair)" }} />
         <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-55)" }}>
-          {formatShortDate(startDate)} → {formatShortDate(endDate)}
+          {formatShortDate(snapshot.previousPaycheckDate)} → {formatShortDate(snapshot.nextPaycheckDate)}
         </span>
       </div>
-      <div style={{ position: "relative", height: 62 }}>
+      <div style={{ position: "relative", height: 48, marginTop: 8 }}>
+        <div style={{ position: "absolute", left: 0, right: 0, top: 20, height: 1, background: "var(--ink)" }} />
+        {labels.map((idx) => {
+          const left = `${(idx / totalDays) * 100}%`;
+          const date = addDays(snapshot.previousPaycheckDate, idx);
+          return (
+            <div key={idx} style={{ position: "absolute", left, top: 13, transform: "translateX(-50%)", textAlign: "center" }}>
+              <div style={{ width: 1, height: 15, background: "var(--ink-55)", margin: "0 auto" }} />
+              <div className="mono tnum" style={{ marginTop: 5, fontSize: 8.5, color: "var(--ink-55)" }}>
+                {parseISODate(date).getDate()}
+              </div>
+            </div>
+          );
+        })}
         <div
           style={{
             position: "absolute",
-            left: 0,
-            right: 0,
-            top: 27,
-            height: 1,
-            background: "var(--ink-55)"
-          }}
-        />
-        {tickIndexes.map((index) => (
-          <div
-            key={index}
-            style={{
-              position: "absolute",
-              left: pct(index),
-              top: 22,
-              width: 1,
-              height: index === 0 || index === cycleDays - 1 ? 11 : 7,
-              background: "var(--ink-35)",
-              transform: "translateX(-0.5px)"
-            }}
-          />
-        ))}
-        <div
-          style={{
-            position: "absolute",
-            left: pct(todayIdx),
-            top: 4,
+            left: `${(todayIdx / totalDays) * 100}%`,
+            top: 0,
             transform: "translateX(-50%)",
             textAlign: "center"
           }}
         >
-          <div className="slab" style={{ fontSize: 8, letterSpacing: "0.12em" }}>
-            СЕГОДНЯ
+          <div className="slab" style={{ fontSize: 8.5, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            сегодня
           </div>
-          <div style={{ width: 2, height: 28, margin: "2px auto 0", background: "var(--ink)" }} />
-          <div
-            style={{
-              width: 5,
-              height: 5,
-              margin: "-18px auto 0",
-              borderRadius: 999,
-              background: "var(--ink)"
-            }}
-          />
-        </div>
-        {visiblePayments.map((payment, index) => {
-          const paymentIdx = daysBetween(startDate, payment.date);
-          return (
-            <div
-              key={`${payment.date}-${index}`}
-              title={formatShortDate(payment.date)}
-              style={{
-                position: "absolute",
-                left: pct(paymentIdx),
-                top: payment.nearest ? 28 : 25,
-                width: payment.nearest ? 5 : 3,
-                height: payment.nearest ? 18 : 10,
-                transform: "translateX(-50%)",
-                background: payment.missed ? "var(--red)" : payment.nearest ? "var(--red)" : "var(--ink-55)"
-              }}
-            />
-          );
-        })}
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 16 }}>
-          {tickIndexes.map((index) => {
-            const tickDate = addDays(startDate, index);
-            const tick = parseISODate(tickDate);
-            const isEdge = index === 0 || index === cycleDays - 1;
-            return (
-              <span
-                key={`label-${index}`}
-                className="mono tnum"
-                style={{
-                  position: "absolute",
-                  left: pct(index),
-                  transform: isEdge && index === 0
-                    ? "translateX(-15%)"
-                    : isEdge && index === cycleDays - 1
-                      ? "translateX(-85%)"
-                      : "translateX(-50%)",
-                  fontSize: 9,
-                  color: "var(--ink-55)"
-                }}
-              >
-                {tick.getDate()}
-              </span>
-            );
-          })}
+          <div style={{ width: 3, height: 24, background: "var(--red)", margin: "3px auto 0" }} />
         </div>
       </div>
-    </Section>
+    </section>
   );
 }
 
-function PaymentLine({ payment, isPaydayPayment = false }: { payment?: MandatoryPayment; isPaydayPayment?: boolean }) {
-  if (!payment) {
+function CheckPanel({
+  check,
+  onDailyCheck
+}: {
+  check?: DailyCheck;
+  onDailyCheck: (mode: DailyCheckDialogMode) => void;
+}) {
+  return (
+    <section style={{ padding: "8px var(--pad-x) 10px", borderTop: "1px solid var(--hair)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: "0.5px solid var(--ink)" }}>
+        <CheckCell
+          label="утро"
+          value={check?.morningBalance}
+          note={check?.morningAt ? "зафиксировано" : "внести остаток"}
+          onClick={() => onDailyCheck("morning-check")}
+        />
+        <CheckCell
+          label="вечер"
+          value={check?.eveningBalance ?? check?.calculatedEveningBalance}
+          note={
+            check?.eveningAt
+              ? "день закрыт"
+              : check?.calculatedEveningBalance !== undefined
+                ? "расчётный остаток"
+                : "закрыть день"
+          }
+          onClick={() => onDailyCheck("evening-check")}
+          right
+        />
+      </div>
+    </section>
+  );
+}
+
+function CheckCell({
+  label,
+  value,
+  note,
+  onClick,
+  right = false
+}: {
+  label: string;
+  value?: number;
+  note: string;
+  onClick: () => void;
+  right?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="tap-highlight"
+      onClick={onClick}
+      style={{
+        minHeight: 74,
+        padding: "11px 12px",
+        border: "none",
+        borderLeft: right ? "0.5px solid var(--ink)" : "none",
+        background: "transparent",
+        color: "var(--ink)",
+        textAlign: "left",
+        cursor: "pointer",
+        fontFamily: "inherit"
+      }}
+    >
+      <div className="eyebrow">{label}</div>
+      <div className="slab tnum" style={{ marginTop: 8, fontSize: 17 }}>
+        {value === undefined ? "—" : formatMoney(value)}
+      </div>
+      <div className="mono" style={{ marginTop: 4, fontSize: 9, color: "var(--ink-55)" }}>
+        {note}
+      </div>
+    </button>
+  );
+}
+
+function DaySummary({ check }: { check?: DailyCheck }) {
+  if (
+    !check ||
+    (check.eveningBalance === undefined &&
+      (check.quickSpentAmount ?? 0) <= 0 &&
+      (check.creditSpentAmount ?? 0) <= 0 &&
+      (check.creditPaymentAmount ?? 0) <= 0)
+  ) return null;
+
+  const delta = check.delta ?? 0;
+  const deltaColor = delta >= 0 ? "var(--blue)" : "var(--red)";
+  const eveningLabel = check.eveningBalance === undefined ? "расчётный вечер" : "вечер подтверждён";
+
+  return (
+    <section style={{ padding: "10px var(--pad-x)", borderTop: "1px solid var(--hair)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span className="eyebrow eyebrow--ink">Факт дня</span>
+        <div style={{ flex: 1, height: 0.5, background: "var(--hair)" }} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 9 }}>
+        <Metric label="план" value={check.plannedLimit} />
+        <Metric label="факт" value={check.freeSpent ?? 0} />
+        <Metric label="отклонение" value={delta} color={deltaColor} signed />
+      </div>
+      <div className="mono" style={{ marginTop: 7, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.45 }}>
+        {eveningLabel}
+        {check.calculatedEveningBalance !== undefined && check.eveningBalance === undefined
+          ? `: ${formatMoney(check.calculatedEveningBalance)} ₽`
+          : ""}
+        {(check.quickSpentAmount ?? 0) > 0 ? ` · свои расходы ${formatMoney(check.quickSpentAmount ?? 0)} ₽` : ""}
+        {(check.creditSpentAmount ?? 0) > 0 ? ` · кредитка ${formatMoney(check.creditSpentAmount ?? 0)} ₽` : ""}
+        {(check.creditPaymentAmount ?? 0) > 0 ? ` · платёж по карте ${formatMoney(check.creditPaymentAmount ?? 0)} ₽` : ""}
+      </div>
+      {check.quickSpentEntries && check.quickSpentEntries.length > 0 && (
+        <div className="mono" style={{ marginTop: 5, fontSize: 8.8, color: "var(--ink-55)", lineHeight: 1.45 }}>
+          {check.quickSpentEntries.slice(-3).map((entry) => `${formatMoney(entry.amount)} ₽${entry.operation === "credit-payment" ? " платёж по карте" : entry.paymentSource === "credit" ? " кредитка" : ""}${entry.note ? ` — ${entry.note}` : ""}`).join(" · ")}
+        </div>
+      )}
+      {(check.reason || check.note) && (
+        <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.45 }}>
+          {check.reason ? `Причина: ${REASON_LABELS[check.reason]}` : ""}
+          {check.reason && check.note ? " · " : ""}
+          {check.note}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MiniMetric({ label, value, onClick }: { label: string; value: number; onClick?: () => void }) {
+  const content = (
+    <>
+      <div className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>
+        {label}
+      </div>
+      <div className="slab tnum" style={{ marginTop: 3, fontSize: 12 }}>
+        {formatMoney(value)}
+      </div>
+    </>
+  );
+  if (!onClick) return <div>{content}</div>;
+  return (
+    <button
+      type="button"
+      className="tap-highlight"
+      onClick={onClick}
+      style={{
+        border: "none",
+        background: "transparent",
+        color: "var(--ink)",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        padding: 0,
+        textAlign: "left"
+      }}
+    >
+      {content}
+    </button>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  color = "var(--ink)",
+  signed = false
+}: {
+  label: string;
+  value: number;
+  color?: string;
+  signed?: boolean;
+}) {
+  const sign = signed && value > 0 ? "+" : signed && value < 0 ? "−" : "";
+  return (
+    <div>
+      <div className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>
+        {label}
+      </div>
+      <div className="slab tnum" style={{ marginTop: 4, fontSize: 13, color }}>
+        {sign}
+        {formatMoney(Math.abs(value))}
+      </div>
+    </div>
+  );
+}
+
+function paymentWord(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return "платёж";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "платежа";
+  return "платежей";
+}
+
+function PaymentLine({
+  payments,
+  nextPaycheckDate
+}: {
+  payments: MandatoryPayment[];
+  nextPaycheckDate: string;
+}) {
+  if (payments.length === 0) {
     return (
-      <Section compact topLine="none">
+      <section style={{ padding: "9px var(--pad-x)", borderTop: "1.5px solid var(--hair)" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <div style={{ width: 2, height: 17, background: "var(--ink-35)" }} />
           <span className="eyebrow">ближайший</span>
@@ -649,12 +584,27 @@ function PaymentLine({ payment, isPaydayPayment = false }: { payment?: Mandatory
             до зарплаты нет обязательных платежей
           </span>
         </div>
-      </Section>
+      </section>
     );
   }
 
+  const first = payments[0];
+  const total = payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const isPaydayPayment = first.dueDate === nextPaycheckDate;
+  const title =
+    payments.length === 1
+      ? first.title
+      : `${payments.length} ${paymentWord(payments.length)}`;
+  const detail =
+    payments.length === 1
+      ? ""
+      : payments
+          .slice(0, 2)
+          .map((payment) => payment.title)
+          .join(", ") + (payments.length > 2 ? "…" : "");
+
   return (
-    <Section compact topLine="none">
+    <section style={{ padding: "9px var(--pad-x)", borderTop: "1.5px solid var(--hair)" }}>
       <div
         style={{
           display: "grid",
@@ -663,28 +613,33 @@ function PaymentLine({ payment, isPaydayPayment = false }: { payment?: Mandatory
           gap: 8
         }}
       >
-        <div style={{ width: 2, height: 18, background: "var(--red)", alignSelf: "center" }} />
-        <span className="eyebrow">ближайший</span>
+        <div style={{ width: 2, height: 18, background: isPaydayPayment ? "var(--yellow)" : "var(--red)", alignSelf: "center" }} />
+        <span className="eyebrow">{payments.length > 1 ? "ближайшие" : "ближайший"}</span>
         <div style={{ minWidth: 0 }}>
           <span className="slab" style={{ fontSize: 12 }}>
-            {payment.title}
+            {title}
           </span>
           <span className="mono" style={{ marginLeft: 6, fontSize: 9.5, color: "var(--ink-55)" }}>
-            · {formatShortDate(payment.dueDate)} · {payment.status === "paid" ? "оплачен" : isPaydayPayment ? "в день зарплаты" : "учтён"}
+            · {formatShortDate(first.dueDate)} · {isPaydayPayment ? "в день зарплаты" : "учтён"}
           </span>
+          {detail && (
+            <div className="mono" style={{ marginTop: 2, fontSize: 8.7, color: "var(--ink-55)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {detail}
+            </div>
+          )}
         </div>
-        <InlineNumber value={formatMoney(payment.amount)} size={13} color="var(--ink)" />
+        <InlineNumber value={formatMoney(total)} size={13} color="var(--ink)" />
       </div>
-    </Section>
+    </section>
   );
 }
 
-function FooterStrips({
+function FooterSummary({
   state,
-  savingsAccent
+  onExplain
 }: {
   state: FinanceState;
-  savingsAccent: string;
+  onExplain: (topic: TodayInfoTopic) => void;
 }) {
   return (
     <div
@@ -695,80 +650,231 @@ function FooterStrips({
         borderBottom: "0.5px solid var(--ink)"
       }}
     >
-      <FooterStrip label="оперативный" value={state.operationalBalance} />
-      <FooterStrip label="подушка" value={state.reserve.amount} />
-      <FooterStrip label="накопления" value={state.savings.balance} color={savingsAccent} accent={savingsAccent} />
+      <FooterCell label="оперативный" value={state.operationalBalance} onClick={() => onExplain("operational")} />
+      <FooterCell label="подушка" value={state.reserve.amount} onClick={() => onExplain("reserve")} />
+      <FooterCell label="накопления" value={state.savings.balance} blue onClick={() => onExplain("savings")} />
     </div>
   );
 }
 
-function FooterStrip({
+function FooterCell({
   label,
   value,
-  color = "var(--ink)",
-  accent
+  blue = false,
+  onClick
 }: {
   label: string;
   value: number;
-  color?: string;
-  accent?: string;
+  blue?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
+      className="tap-highlight"
+      onClick={onClick}
       style={{
-        minWidth: 0,
-        padding: "13px var(--pad-x) 14px",
-        borderRight: "0.5px solid var(--ink)",
-        borderTop: accent ? `2px solid ${accent}` : "none"
+        minHeight: 62,
+        padding: "10px 12px",
+        borderRight: "none",
+        borderBottom: "none",
+        borderLeft: blue ? "0.5px solid var(--ink)" : label === "подушка" ? "0.5px solid var(--ink)" : "none",
+        borderTop: blue ? "2px solid var(--blue)" : "none",
+        background: "transparent",
+        color: "var(--ink)",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        textAlign: "left"
       }}
     >
-      <div className="eyebrow" style={{ color: "var(--ink-55)" }}>
+      <div className="eyebrow" style={{ fontSize: 8 }}>
         {label}
       </div>
-      <div className="slab tnum" style={{ marginTop: 8, fontSize: 16, color }}>
+      <div className="slab tnum" style={{ marginTop: 8, fontSize: 14, color: blue ? "var(--blue)" : "var(--ink)" }}>
         {formatMoney(value)}
       </div>
+    </button>
+  );
+}
+
+function TodayActions({
+  onAction,
+  onQuickExpense
+}: {
+  onAction: (action: ActionDialogKind) => void;
+  onQuickExpense: () => void;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderTop: "0.5px solid var(--ink)" }}>
+      <TodayActionButton label="Расход" shape="square" tone="primary" onClick={onQuickExpense} />
+      <TodayActionButton label="В накопления" shape="circle" tone="blue" onClick={() => onAction("transfer")} />
+      <TodayActionButton label="Доход / премия" shape="bar" tone="ink" onClick={() => onAction("income")} />
     </div>
   );
 }
 
-function ActionRow({ onAction }: { onAction: (action: ActionDialogKind) => void }) {
+function TodayActionButton({
+  label,
+  shape,
+  onClick,
+  tone
+}: {
+  label: string;
+  shape: "circle" | "square" | "bar" | "halfcircle";
+  onClick: () => void;
+  tone: "primary" | "blue" | "ink";
+}) {
+  const isPrimary = tone === "primary";
+  const color = tone === "blue" ? "var(--blue)" : "var(--ink)";
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => onAction("income")}
-        className="tap-highlight"
+    <button
+      type="button"
+      className="tap-highlight"
+      onClick={onClick}
+      style={{
+        height: 46,
+        padding: "9px 6px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        minWidth: 0,
+        background: isPrimary ? "var(--ink)" : "var(--paper)",
+        color: isPrimary ? "var(--paper)" : color,
+        border: "none",
+        borderLeft: isPrimary ? "none" : "0.5px solid var(--ink)",
+        cursor: "pointer",
+        fontFamily: "inherit"
+      }}
+    >
+      <Glyph
+        shape={shape}
+        fill={isPrimary ? "var(--paper)" : "none"}
+        stroke={isPrimary ? undefined : color}
+        size={8}
+        sw={1.2}
+      />
+      <span
+        className="slab"
         style={{
-          width: "100%",
-          padding: "7px var(--pad-x)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          gap: 7,
-          background: "var(--paper)",
-          color: "var(--ink-55)",
-          border: "none",
-          borderTop: "0.5px solid var(--hair)",
-          cursor: "pointer",
-          fontFamily: "inherit"
+          maxWidth: "100%",
+          fontSize: 8.5,
+          letterSpacing: 0,
+          lineHeight: 1.05,
+          textAlign: "center",
+          textTransform: "uppercase"
         }}
       >
-        <span className="mono" style={{ fontSize: 9.5 }}>
-          + доход / премия
-        </span>
-        <Glyph shape="circle" fill="none" stroke="var(--ink-55)" size={7} sw={1} />
-      </button>
-      <CTARow
-        primary={{ label: "Записать расход", shape: "square", onClick: () => onAction("expense") }}
-        secondary={{
-          label: "В накопления",
-          shape: "circle",
-          tone: "blue",
-          onClick: () => onAction("transfer")
-        }}
-      />
-    </div>
+        {label}
+      </span>
+    </button>
+  );
+}
+
+function TodayInfoDialog({
+  topic,
+  state,
+  snapshot,
+  onOpenChange
+}: {
+  topic: TodayInfoTopic | null;
+  state: FinanceState;
+  snapshot: CalculationSnapshot;
+  onOpenChange: (open: boolean) => void;
+}) {
+  if (!topic) return null;
+
+  const plannedSavings = snapshot.plannedSavingsTransfersBeforeNextPaycheck;
+  const free = Math.round(snapshot.availableUntilNextPaycheck);
+  const paceReady = snapshot.savingsMovementCount > 0 && snapshot.savingsPaceDays >= 7;
+  const data: Record<TodayInfoTopic, { title: string; description: string; lines: string[] }> = {
+    spent: {
+      title: "Потрачено в цикле",
+      description: "Оценка того, сколько оперативных денег ушло с начала текущего зарплатного цикла.",
+      lines: [
+        `Старт цикла: ${formatMoney(state.payCycle.openingOperational)} ₽`,
+        `+ доходы до зарплаты: ${formatMoney(snapshot.incomeBeforeNextPaycheck)} ₽`,
+        `− текущий оперативный остаток: ${formatMoney(state.operationalBalance)} ₽`
+      ]
+    },
+    free: {
+      title: free < 0 ? "Почему денег не хватает" : "Останется до зарплаты",
+      description:
+        free < 0
+          ? "Это не долг. Это предупреждение: будущих обязательств больше, чем доступных денег."
+          : "Сколько останется после ближайших платежей, плановых накоплений и подушки.",
+      lines: [
+        `Оперативный остаток: ${formatMoney(state.operationalBalance)} ₽`,
+        `+ ожидаемые доходы до зарплаты: ${formatMoney(snapshot.incomeBeforeNextPaycheck)} ₽`,
+        `− платежи до зарплаты: ${formatMoney(snapshot.mandatoryPaymentsBeforeNextPaycheck)} ₽`,
+        `− подушка на сегодня: ${formatMoney(state.reserve.amount)} ₽`,
+        plannedSavings > 0 ? `− плановые переводы в накопления: ${formatMoney(plannedSavings)} ₽` : "− плановые переводы в накопления: 0 ₽",
+        `= останется до зарплаты: ${formatMoney(free)} ₽`
+      ]
+    },
+    reserve: {
+      title: "Подушка на сегодня",
+      description: "Часть оперативных денег, которую ты решил не трогать до зарплаты.",
+      lines: [
+        `Желаемая подушка в настройках: ${formatMoney(state.settings.reserveAmount)} ₽`,
+        `Фактически сейчас защищено: ${formatMoney(state.reserve.amount)} ₽`,
+        "Если оперативных денег меньше, МФМ показывает только доступную часть.",
+        "Копилка находится в накоплениях. Подушка на сегодня находится в оперативных деньгах."
+      ]
+    },
+    pace: {
+      title: "Темп накоплений",
+      description: "Это не ручной прогноз из настроек, а средний темп по реальным переводам и снятиям.",
+      lines: paceReady
+        ? [
+            `Движений: ${snapshot.savingsMovementCount}`,
+            `Период: ${snapshot.savingsPaceDays} дн.`,
+            `Средний темп: ${formatMoney(Math.round(snapshot.monthlySavingPace))} ₽/мес`,
+            `Прогноз +12 мес.: ${formatMoney(Math.round(snapshot.savingsForecastNominal))} ₽`
+          ]
+        : [
+            `Движений: ${snapshot.savingsMovementCount}`,
+            `Период: ${snapshot.savingsPaceDays} дн.`,
+            "Темп не показывается, пока нет хотя бы недели реальных движений."
+          ]
+    },
+    operational: {
+      title: "Оперативный остаток",
+      description: "Это деньги, которыми можно платить сейчас.",
+      lines: [
+        `Сейчас: ${formatMoney(state.operationalBalance)} ₽`,
+        "Быстрый расход своими деньгами уменьшает это число.",
+        "Покупка с кредитки увеличивает долг. Платёж по кредитке уменьшает и остаток, и долг."
+      ]
+    },
+    savings: {
+      title: "Накопления",
+      description: "Общий котёл — все накопления. Цели — части этого котла, закреплённые за конкретными задачами.",
+      lines: [
+        `Всего в котле: ${formatMoney(state.savings.balance)} ₽`,
+        `Копилка: ${formatMoney(state.savings.cushion.allocated)} ₽`,
+        "Перевод «На цель» увеличивает котёл и сразу закрепляет сумму за выбранной целью."
+      ]
+    }
+  };
+  const current = data[topic];
+
+  return (
+    <Dialog open={Boolean(topic)} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{current.title}</DialogTitle>
+          <DialogDescription>{current.description}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="mono" style={{ display: "grid", gap: 7, fontSize: 9.5, lineHeight: 1.45, color: "var(--ink-80)" }}>
+            {current.lines.map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -776,38 +882,23 @@ export function TodayScreen({
   state,
   snapshot,
   onAction,
+  onDailyCheck,
+  onQuickExpense,
   onConfirmPaycheck
 }: TodayScreenProps) {
   const date = useMemo(() => dateBits(snapshot.today), [snapshot.today]);
+  const [infoTopic, setInfoTopic] = useState<TodayInfoTopic | null>(null);
+  const dailyCheck = getDailyCheck(state, snapshot.today);
+  const dailyStatus = dailyStatusText(dailyCheck);
   const bannerState = snapshot.uiStates.find((s) => s !== "normal");
   const bannerKind = bannerState ? stateToBannerKind(bannerState) : null;
-
   const safeToday = Math.max(0, Math.round(snapshot.safeToSpendToday));
-  const tomorrow = Math.max(0, Math.round(snapshot.ifZeroTodayTomorrow));
-
-  const spent = state.variableExpenses
-    .filter((expense) => isAfterOrSame(expense.date, state.payCycle.startDate))
-    .filter((expense) => isBeforeOrSame(expense.date, snapshot.today))
-    .reduce((sum, expense) => sum + expense.amount, 0);
-
-  const paceOk = !snapshot.uiStates.includes("savings-off-track");
-  const savingsAccent = paceOk ? "var(--blue)" : "var(--red)";
-  const cycleStartDate = snapshot.previousPaycheckDate;
-  const cycleEndDate = snapshot.nextPaycheckDate;
-  const payments = state.mandatoryPayments
-    .filter((payment) => payment.status === "scheduled" || payment.status === "missed")
-    .map((payment) => ({
-      date: payment.dueDate,
-      nearest: payment.id === snapshot.nextMandatoryPayment?.id,
-      missed: payment.status === "missed"
-    }));
-  const paceDate = snapshot.primaryGoal?.goal.deadline
-    ? formatShortDate(snapshot.primaryGoal.goal.deadline)
-    : "12 мес.";
-  const paceDelta =
-    !paceOk && snapshot.primaryGoal
-      ? Math.round(snapshot.primaryGoal.forecastAtDeadline - snapshot.primaryGoal.goal.target)
-      : undefined;
+  const cycleSpent = Math.max(
+    0,
+    state.payCycle.openingOperational +
+      snapshot.incomeBeforeNextPaycheck -
+      state.operationalBalance
+  );
 
   return (
     <div
@@ -828,6 +919,8 @@ export function TodayScreen({
         />
       )}
 
+      <Banner kind={dailyStatus.kind} title={dailyStatus.title} note={dailyStatus.note} />
+
       {snapshot.uiStates.includes("payday-arrived") && (
         <div style={{ padding: "8px var(--pad-x) 0" }}>
           <Button variant="primary" onClick={onConfirmPaycheck} style={{ width: "100%" }}>
@@ -839,37 +932,36 @@ export function TodayScreen({
 
       <Hero
         safeToday={safeToday}
-        freeUntilPaycheck={Math.round(snapshot.availableUntilNextPaycheck)}
+        operationalBalance={state.operationalBalance}
+        availableUntilPaycheck={Math.round(snapshot.availableUntilNextPaycheck)}
         remainingDays={snapshot.remainingDays}
-        tomorrow={tomorrow}
       />
-      <FormulaDisclosure state={state} snapshot={snapshot} safeToday={safeToday} />
+      <FormulaPanel state={state} snapshot={snapshot} />
       <BalanceStrip
-        spent={spent}
-        free={Math.max(0, Math.round(snapshot.availableUntilNextPaycheck))}
-        cushion={state.reserve.amount}
+        spent={Math.round(cycleSpent)}
+        free={Math.round(snapshot.availableUntilNextPaycheck)}
+        reserve={state.reserve.amount}
+        onExplain={setInfoTopic}
       />
-      <PaceLine
-        pace={Math.round(snapshot.monthlySavingPace)}
-        forecast={Math.round(snapshot.savingsForecastNominal)}
-        current={Math.round(state.savings.balance)}
-        date={paceDate}
-        ok={paceOk}
-        delta={paceDelta}
-      />
-      <CycleMini
-        startDate={cycleStartDate}
-        endDate={cycleEndDate}
-        today={snapshot.today}
-        payments={payments}
-      />
+      <PaceRow snapshot={snapshot} onExplain={setInfoTopic} />
+      <TodayCycleAxis snapshot={snapshot} />
+      <CheckPanel check={dailyCheck} onDailyCheck={onDailyCheck} />
+      <DaySummary check={dailyCheck} />
       <PaymentLine
-        payment={snapshot.nextMandatoryPayment}
-        isPaydayPayment={snapshot.nextMandatoryPayment?.dueDate === snapshot.nextPaycheckDate}
+        payments={snapshot.nextMandatoryPayments}
+        nextPaycheckDate={snapshot.nextPaycheckDate}
       />
       <div style={{ flex: 1, minHeight: 10 }} />
-      <FooterStrips state={state} savingsAccent={savingsAccent} />
-      <ActionRow onAction={onAction} />
+      <FooterSummary state={state} onExplain={setInfoTopic} />
+      <TodayActions onAction={onAction} onQuickExpense={onQuickExpense} />
+      <TodayInfoDialog
+        topic={infoTopic}
+        state={state}
+        snapshot={snapshot}
+        onOpenChange={(open) => {
+          if (!open) setInfoTopic(null);
+        }}
+      />
     </div>
   );
 }

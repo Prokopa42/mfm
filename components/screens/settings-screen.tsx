@@ -160,7 +160,7 @@ const RUBRIC_SCOPE_LABEL: Record<RubricScope, string> = {
   income: "Доход",
   transfer: "Перевод",
   withdraw: "Снятие",
-  "mandatory-payment": "Обязательный"
+  "mandatory-payment": "Рубрики обязательных платежей"
 };
 
 const RUBRIC_SCOPES: RubricScope[] = [
@@ -361,6 +361,29 @@ function NumericInputControl({
   );
 }
 
+function ReadOnlyMoney({ value, note }: { value: number; note: string }) {
+  return (
+    <div
+      style={{
+        width: 136,
+        minHeight: 30,
+        display: "grid",
+        justifyItems: "end",
+        alignContent: "center",
+        gap: 3,
+        padding: "4px 0"
+      }}
+    >
+      <span className="slab tnum" style={{ fontSize: 11, color: "var(--ink-55)" }}>
+        {formatMoney(value)} <span className="mono" style={{ fontSize: 8.5 }}>₽</span>
+      </span>
+      <span className="mono" style={{ fontSize: 7.8, color: "var(--ink-35)" }}>
+        {note}
+      </span>
+    </div>
+  );
+}
+
 // ─── Header ─────────────────────────────────────────────
 function SettingsHeader({ dirtyCount }: { dirtyCount: number }) {
   return (
@@ -454,19 +477,31 @@ function StagedBanner({ dirtyCount }: { dirtyCount: number }) {
 }
 
 // ─── Screen ─────────────────────────────────────────────
-export function SettingsScreen({ state, setState, onGoLive }: SettingsScreenProps) {
+export function SettingsScreen({ state, setState, onReset, onGoLive }: SettingsScreenProps) {
   // applied = state (external), draft = local copy of editable fields
   const [draft, setDraft] = useState<SettingsDraft>(() => createSettingsDraft(state));
   // `dirty` is a sticky "user has touched the form" flag; while it's false,
   // external state changes (e.g. a new expense on Today) re-sync the draft.
   const [dirty, setDirty] = useState(false);
   const [goLiveOpen, setGoLiveOpen] = useState(false);
+  const [fullResetOpen, setFullResetOpen] = useState(false);
   const [keepPaymentIds, setKeepPaymentIds] = useState<string[]>([]);
 
-  const dirtyKeys = computeDirtyKeys(draft, state);
+  const today = todayISO();
+  const hasDailyCheckToday = state.dailyChecks.some(
+    (check) =>
+      check.date === today &&
+      (check.morningBalance !== undefined ||
+        check.eveningBalance !== undefined ||
+        (check.quickSpentAmount ?? 0) > 0 ||
+        (check.creditSpentAmount ?? 0) > 0 ||
+        (check.creditPaymentAmount ?? 0) > 0)
+  );
+  const dirtyKeys = computeDirtyKeys(draft, state).filter(
+    (key) => !(hasDailyCheckToday && key === "operationalBalance")
+  );
   const hasChanges = dirtyKeys.length > 0;
   const isDirty = (k: DraftKey) => dirtyKeys.includes(k);
-  const today = todayISO();
   const futureScheduledPayments = useMemo(
     () =>
       state.mandatoryPayments
@@ -493,20 +528,25 @@ export function SettingsScreen({ state, setState, onGoLive }: SettingsScreenProp
 
   function applyDraft() {
     if (!hasChanges) return;
-    setState((previous) => ({
-      ...previous,
-      operationalBalance: draft.operationalBalance,
-      settings: { ...draft.settings },
-      reserve: { ...previous.reserve, amount: draft.settings.reserveAmount },
-      savings: {
-        ...previous.savings,
-        balance: draft.savingsBalance,
-        cushion: {
-          ...previous.savings.cushion,
-          target: Math.max(0, draft.savingsCushionTarget)
+    setState((previous) => {
+      const operationalBalance = hasDailyCheckToday ? previous.operationalBalance : Math.max(0, draft.operationalBalance);
+      const reserveAmount = Math.max(0, draft.settings.reserveAmount);
+
+      return {
+        ...previous,
+        operationalBalance,
+        settings: { ...draft.settings, reserveAmount },
+        reserve: { ...previous.reserve, amount: Math.min(reserveAmount, operationalBalance) },
+        savings: {
+          ...previous.savings,
+          balance: draft.savingsBalance,
+          cushion: {
+            ...previous.savings.cushion,
+            target: Math.max(0, draft.savingsCushionTarget)
+          }
         }
-      }
-    }));
+      };
+    });
     setDirty(false);
   }
 
@@ -726,11 +766,15 @@ export function SettingsScreen({ state, setState, onGoLive }: SettingsScreenProp
         </Row>
       </Group>
 
-      {/* ─── Group 2: Подушка цикла ─────────────────────── */}
-      <Group title="Подушка цикла" note="cashflow reserve">
+      {/* ─── Group 2: Подушка на сегодня ────────────────── */}
+      <Group title="Подушка на сегодня" note="оперативный запас">
         <Row
-          label="Размер подушки цикла"
-          hint="ближний защитный запас: вычитается из «можно сегодня»"
+          label="Желаемая подушка"
+          hint={
+            hasDailyCheckToday
+              ? "новые расчёты учтут этот запас; уже записанный факт дня не перепишется"
+              : "часть оперативных денег, которую приложение не предлагает тратить"
+          }
           dirty={isDirty("reserveAmount")}
         >
           <NumericInputControl
@@ -765,8 +809,8 @@ export function SettingsScreen({ state, setState, onGoLive }: SettingsScreenProp
           />
         </Row>
         <Row
-          label="Цель подушки в накоплениях"
-          hint="ориентир для долгосрочного резерва внутри котла; уже выделенные деньги не двигает"
+          label="Цель копилки"
+          hint="ориентир для отдельной копилки внутри накоплений; уже выделенные деньги не двигает"
           dirty={isDirty("savingsCushionTarget")}
         >
           <NumericInputControl
@@ -777,24 +821,32 @@ export function SettingsScreen({ state, setState, onGoLive }: SettingsScreenProp
             step={1000}
             variant="money"
             suffix="₽"
-            ariaLabel="Цель подушки в накоплениях"
+            ariaLabel="Цель копилки"
           />
         </Row>
         <Row
           label="Оперативный остаток"
-          hint="деньги текущего расходного контура"
+          hint={
+            hasDailyCheckToday
+              ? "сегодня уже есть замер; остаток меняется на вкладке Сегодня через утро, вечер или быстрый расход"
+              : "деньги текущего расходного контура"
+          }
           dirty={isDirty("operationalBalance")}
         >
-          <NumericInputControl
-            value={draft.operationalBalance}
-            onChange={(v) => patch((p) => ({ ...p, operationalBalance: v }))}
-            min={-10_000_000}
-            max={10_000_000}
-            step={1000}
-            variant="money"
-            suffix="₽"
-            ariaLabel="Оперативный остаток"
-          />
+          {hasDailyCheckToday ? (
+            <ReadOnlyMoney value={state.operationalBalance} note="править на Сегодня" />
+          ) : (
+            <NumericInputControl
+              value={draft.operationalBalance}
+              onChange={(v) => patch((p) => ({ ...p, operationalBalance: Math.max(0, v) }))}
+              min={0}
+              max={10_000_000}
+              step={1000}
+              variant="money"
+              suffix="₽"
+              ariaLabel="Оперативный остаток"
+            />
+          )}
         </Row>
         <Row
           label="Автовычитать плановые переводы"
@@ -811,8 +863,8 @@ export function SettingsScreen({ state, setState, onGoLive }: SettingsScreenProp
       {/* ─── Group 4: Расчёт ────────────────────────────── */}
       <Group title="Расчёт" note="calculation">
         <Row
-          label="Учитывать сегодня в делителе"
-          hint="сегодня входит в число дней до зарплаты; лимит осторожнее"
+          label="Сегодня входит в расчёт дней"
+          hint="если включено, свободные деньги делятся с учётом сегодняшнего дня; лимит осторожнее"
           dirty={isDirty("includeTodayInDivisor")}
         >
           <Switch
@@ -866,6 +918,7 @@ export function SettingsScreen({ state, setState, onGoLive }: SettingsScreenProp
       />
 
       <GoLiveBlock onOpen={openGoLive} />
+      <FullResetBlock onOpen={() => setFullResetOpen(true)} />
 
       <div style={{ flex: 1, minHeight: 14 }} />
 
@@ -878,6 +931,15 @@ export function SettingsScreen({ state, setState, onGoLive }: SettingsScreenProp
         onTogglePayment={toggleKeepPayment}
         onOpenChange={setGoLiveOpen}
         onConfirm={applyGoLive}
+      />
+      <FullResetDialog
+        open={fullResetOpen}
+        onOpenChange={setFullResetOpen}
+        onConfirm={() => {
+          onReset?.();
+          setFullResetOpen(false);
+          setDirty(false);
+        }}
       />
     </div>
   );
@@ -896,7 +958,7 @@ function GoLiveBlock({ onOpen }: { onOpen: () => void }) {
           lineHeight: 1.45
         }}
       >
-        Сценарий для перехода из demo/MVP в реальную работу: журнал очищается, текущие остатки и структура
+        Сценарий для перехода из demo/MVP в реальную работу: операции и дневник очищаются, текущие остатки и структура
         сохраняются.
       </div>
       <button
@@ -919,6 +981,116 @@ function GoLiveBlock({ onOpen }: { onOpen: () => void }) {
         Сбросить журнал, сохранить текущее состояние
       </button>
     </Group>
+  );
+}
+
+function FullResetBlock({ onOpen }: { onOpen: () => void }) {
+  return (
+    <Group title="Полный сброс" note="очистка">
+      <div
+        className="mono"
+        style={{
+          padding: "8px 0",
+          borderTop: "0.5px solid var(--hair)",
+          fontSize: 9.5,
+          color: "var(--ink-55)",
+          lineHeight: 1.45
+        }}
+      >
+        Отдельно от «Старт работы». Полностью обнуляет деньги, дневник, платежи, накопления, цели и кредиты.
+        Сохраняет только дни зарплаты, а суммы зарплат ставит по 100 000 ₽.
+      </div>
+      <button
+        type="button"
+        className="tap-highlight slab"
+        onClick={onOpen}
+        style={{
+          width: "100%",
+          minHeight: 42,
+          border: "1px solid var(--red)",
+          background: "transparent",
+          color: "var(--red)",
+          fontFamily: "inherit",
+          fontSize: 10.5,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          cursor: "pointer"
+        }}
+      >
+        Полный сброс
+      </button>
+    </Group>
+  );
+}
+
+function FullResetDialog({
+  open,
+  onOpenChange,
+  onConfirm
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Полный сброс</DialogTitle>
+          <DialogDescription>
+            Это не go-live. Будет создано чистое состояние приложения.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="mono" style={{ fontSize: 9.5, lineHeight: 1.5, color: "var(--ink-70)" }}>
+            Обнулим: оперативный остаток, подушку цикла, накопления, цели, дневник, доходы, расходы, переводы,
+            снятия, обязательные платежи, кредиты и кредитные движения.
+          </div>
+          <div className="mono" style={{ fontSize: 9.5, lineHeight: 1.5, color: "var(--ink-55)" }}>
+            Оставим текущие дни зарплаты. Если они не заданы — 5 и 20. Суммы зарплат будут по 100 000 ₽.
+          </div>
+        </DialogBody>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderTop: "0.5px solid var(--ink)" }}>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="tap-highlight slab"
+            style={{
+              minHeight: 42,
+              border: "none",
+              background: "transparent",
+              color: "var(--ink)",
+              fontFamily: "inherit",
+              fontSize: 10,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer"
+            }}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="tap-highlight slab"
+            style={{
+              minHeight: 42,
+              border: "none",
+              borderLeft: "0.5px solid var(--ink)",
+              background: "var(--red)",
+              color: "var(--paper)",
+              fontFamily: "inherit",
+              fontSize: 10,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer"
+            }}
+          >
+            Сбросить всё
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -957,7 +1129,7 @@ function GoLiveDialog({
             items={[
               "текущие деньги и настройки",
               "накопления, цели и распределение",
-              "подушку цикла и подушку накоплений",
+              "подушку цикла и копилку",
               "рубрики",
               "кредиты с текущими остатками"
             ]}
@@ -966,7 +1138,7 @@ function GoLiveDialog({
             title="Очистим"
             items={[
               "доходы, расходы, переводы и снятия",
-              "прошлую историю",
+              "прошлую историю операций и дневник",
               "журнал движений по кредитам",
               "demo-прошлое накоплений"
             ]}
@@ -1206,6 +1378,11 @@ function RubricsGroup({
                 </span>
                 <div style={{ flex: 1, height: 0.5, background: "var(--hair)" }} />
               </div>
+              {scope === "mandatory-payment" && (
+                <div className="mono" style={{ padding: "0 0 5px", fontSize: 8.8, color: "var(--ink-55)", lineHeight: 1.4 }}>
+                  Эти рубрики используются при создании платежей на вкладке Цикл: аренда, связь, кредит, подписки и т.д.
+                </div>
+              )}
 
               {problematic.length > 0 && (
                 <RubricSubsection

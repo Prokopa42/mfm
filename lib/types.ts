@@ -6,6 +6,17 @@ export type MandatoryPaymentStatus = "scheduled" | "paid" | "missed";
 export type ReservePolicy = "flat" | "perCycle";
 export type CalculationRounding = "day" | "hour";
 export type ExpensePaymentSource = "own" | "credit";
+export type DailyCheckStatus = "draft" | "ok" | "warning" | "risk" | "missed";
+export type DailyCheckReason =
+  | "food"
+  | "transport"
+  | "family"
+  | "health"
+  | "work"
+  | "force-majeure"
+  | "extra"
+  | "unknown"
+  | "other";
 export type RubricScope =
   | "expense"
   | "income"
@@ -74,8 +85,15 @@ export interface MandatoryPayment {
   dueDate: ISODate;
   recurrence: MandatoryPaymentRecurrence;
   status: MandatoryPaymentStatus;
+  paidFrom?: ExpensePaymentSource;
+  paidCreditId?: string;
+  recurrenceEndDate?: ISODate;
+  recurrenceExceptions?: ISODate[];
+  sourceRecurringPaymentId?: string;
+  sourceRecurringDate?: ISODate;
   categoryId?: string;
   linkedCreditId?: string;
+  linkedGoalId?: string;
 }
 
 export interface Credit {
@@ -83,6 +101,7 @@ export interface Credit {
   title: string;
   openedAt: ISODate;
   openingBalance: number;
+  creditLimit?: number;
   note?: string;
   isClosed: boolean;
   order: number;
@@ -99,6 +118,8 @@ export interface CreditEvent {
   note?: string;
   linkedExpenseId?: string;
   linkedMandatoryPaymentId?: string;
+  linkedDailyCheckId?: string;
+  linkedQuickSpentEntryId?: string;
 }
 
 export interface VariableExpense {
@@ -112,6 +133,47 @@ export interface VariableExpense {
   category?: string;
   title?: string;
   note?: string;
+}
+
+export interface DailyCheck {
+  id: string;
+  date: ISODate;
+
+  morningBalance?: number;
+  morningAt?: string;
+
+  eveningBalance?: number;
+  eveningAt?: string;
+
+  incomeAmount?: number;
+  transferToSavingsAmount?: number;
+  withdrawalFromSavingsAmount?: number;
+  mandatoryPaidAmount?: number;
+  quickSpentAmount?: number;
+  creditSpentAmount?: number;
+  creditPaymentAmount?: number;
+  creditId?: string;
+  quickSpentEntries?: {
+    id: string;
+    amount: number;
+    createdAt: string;
+    note?: string;
+    operation?: "expense" | "credit-payment";
+    paymentSource?: ExpensePaymentSource;
+    creditId?: string;
+  }[];
+
+  plannedLimit: number;
+
+  grossOutflow?: number;
+  freeSpent?: number;
+  delta?: number;
+  calculatedEveningBalance?: number;
+
+  reason?: DailyCheckReason;
+  note?: string;
+
+  status: DailyCheckStatus;
 }
 
 /**
@@ -159,6 +221,7 @@ export interface TransferToSavings {
   date: ISODate;
   planned: boolean;
   linkedGoalId?: string;
+  linkedMandatoryPaymentId?: string;
   categoryId?: string;
   title?: string;
   note?: string;
@@ -209,7 +272,7 @@ export interface CalculationSettings {
 }
 
 export interface FinanceState {
-  schemaVersion: 5;
+  schemaVersion: 6;
   operationalBalance: number;
   payCycle: PayCycle;
   rubrics: Rubric[];
@@ -218,6 +281,7 @@ export interface FinanceState {
   credits: Credit[];
   creditEvents: CreditEvent[];
   variableExpenses: VariableExpense[];
+  dailyChecks: DailyCheck[];
   reserve: Reserve;
   savings: Savings;
   transfersToSavings: TransferToSavings[];
@@ -270,6 +334,8 @@ export interface CalculationSnapshot {
   safeToSpendToday: number;
   ifZeroTodayTomorrow: number;
   monthlySavingPace: number;
+  savingsMovementCount: number;
+  savingsPaceDays: number;
   savingsForecastNominal: number;
   savingsForecastReal: number;
   yearsUntilPrimaryTarget: number;
@@ -283,6 +349,8 @@ export interface CalculationSnapshot {
   goals: SavingsGoalSnapshot[];
   upcomingMandatoryPayments: MandatoryPayment[];
   nextMandatoryPayment?: MandatoryPayment;
+  nextMandatoryPayments: MandatoryPayment[];
+  nextMandatoryPaymentDate?: ISODate;
   overdueMandatoryPayments: MandatoryPayment[];
   uiStates: InterfaceState[];
   primaryState: InterfaceState;

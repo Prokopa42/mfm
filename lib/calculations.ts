@@ -14,6 +14,8 @@ import type {
   CalculationSnapshot,
   CushionSnapshot,
   CushionStatus,
+  DailyCheck,
+  DailyCheckStatus,
   FinanceState,
   GoalStatus,
   HistoryItem,
@@ -24,6 +26,86 @@ import type {
   SavingsGoal,
   SavingsGoalSnapshot
 } from "@/lib/types";
+
+export function getDailyCheck(state: FinanceState, date: ISODate): DailyCheck | undefined {
+  return state.dailyChecks.find((check) => check.date === date);
+}
+
+export function calculateDailyCheckOutcome(input: {
+  morningBalance?: number;
+  eveningBalance?: number;
+  incomeAmount?: number;
+  transferToSavingsAmount?: number;
+  withdrawalFromSavingsAmount?: number;
+  mandatoryPaidAmount?: number;
+  quickSpentAmount?: number;
+  creditSpentAmount?: number;
+  creditPaymentAmount?: number;
+  plannedLimit: number;
+}): {
+  grossOutflow?: number;
+  freeSpent?: number;
+  delta?: number;
+  calculatedEveningBalance?: number;
+  status: DailyCheckStatus;
+} {
+  if (input.morningBalance === undefined) {
+    return { status: "draft" };
+  }
+
+  const incomeAmount = input.incomeAmount ?? 0;
+  const transferToSavingsAmount = input.transferToSavingsAmount ?? 0;
+  const withdrawalFromSavingsAmount = input.withdrawalFromSavingsAmount ?? 0;
+  const mandatoryPaidAmount = input.mandatoryPaidAmount ?? 0;
+  const quickSpentAmount = input.quickSpentAmount ?? 0;
+  const creditSpentAmount = input.creditSpentAmount ?? 0;
+  const creditPaymentAmount = input.creditPaymentAmount ?? 0;
+  const plannedLimit = Math.max(0, input.plannedLimit);
+
+  let grossOutflow: number;
+  let freeSpent: number;
+  let calculatedEveningBalance: number | undefined;
+
+  if (input.eveningBalance !== undefined) {
+    grossOutflow =
+      input.morningBalance +
+      incomeAmount +
+      withdrawalFromSavingsAmount -
+      input.eveningBalance -
+      transferToSavingsAmount;
+    const creditFactAddon = input.eveningBalance < 0 ? 0 : creditSpentAmount;
+    freeSpent = grossOutflow - mandatoryPaidAmount + creditFactAddon;
+  } else if (quickSpentAmount > 0 || creditSpentAmount > 0 || creditPaymentAmount > 0) {
+    calculatedEveningBalance =
+      input.morningBalance +
+      incomeAmount +
+      withdrawalFromSavingsAmount -
+      transferToSavingsAmount -
+      mandatoryPaidAmount -
+      quickSpentAmount -
+      creditPaymentAmount;
+    grossOutflow = mandatoryPaidAmount + quickSpentAmount + creditSpentAmount + creditPaymentAmount;
+    freeSpent = quickSpentAmount + creditSpentAmount + creditPaymentAmount;
+  } else {
+    return { status: "draft" };
+  }
+
+  const delta = plannedLimit - freeSpent;
+  const status: DailyCheckStatus =
+    delta >= 0
+      ? "ok"
+      : plannedLimit <= 0 || freeSpent > plannedLimit * 1.5
+        ? "risk"
+        : "warning";
+
+  return {
+    grossOutflow,
+    freeSpent,
+    delta,
+    calculatedEveningBalance,
+    status
+  };
+}
 
 export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO()): CalculationSnapshot {
   const firstNextPaycheckDate = getNextPaycheckDate(today, state.settings);
@@ -78,11 +160,8 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
   const safeToSpendToday = Math.max(0, availableUntilNextPaycheck) / remainingDays;
   const ifZeroTodayTomorrow = availableUntilNextPaycheck / Math.max(1, remainingDays - 1);
 
-  const monthsSinceStart = Math.max(0, monthsBetween(state.savings.openedAt, today));
-  const monthlySavingPace =
-    monthsSinceStart > 0
-      ? (state.savings.balance - state.savings.baselineBalance) / monthsSinceStart
-      : 0;
+  const savingsPaceStats = calculateSavingsPaceStats(state, today);
+  const monthlySavingPace = savingsPaceStats.monthlyPace;
 
   const goals = state.goals
     .slice()
@@ -108,6 +187,10 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
   const upcomingMandatoryPayments = visibleMandatoryPaymentsUntilNextPaycheck
     .filter((payment) => compareDates(payment.dueDate, today) >= 0)
     .sort((a, b) => compareDates(a.dueDate, b.dueDate));
+  const nextMandatoryPaymentDate = upcomingMandatoryPayments[0]?.dueDate;
+  const nextMandatoryPayments = nextMandatoryPaymentDate
+    ? upcomingMandatoryPayments.filter((payment) => isSameDate(payment.dueDate, nextMandatoryPaymentDate))
+    : [];
   const overdueMandatoryPayments = visibleMandatoryPaymentsUntilNextPaycheck
     .filter((payment) => compareDates(payment.dueDate, today) < 0)
     .sort((a, b) => compareDates(a.dueDate, b.dueDate));
@@ -164,6 +247,8 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     safeToSpendToday,
     ifZeroTodayTomorrow,
     monthlySavingPace,
+    savingsMovementCount: savingsPaceStats.movementCount,
+    savingsPaceDays: savingsPaceStats.spanDays,
     savingsForecastNominal,
     savingsForecastReal,
     yearsUntilPrimaryTarget,
@@ -171,6 +256,8 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     goals,
     upcomingMandatoryPayments,
     nextMandatoryPayment: upcomingMandatoryPayments[0],
+    nextMandatoryPayments,
+    nextMandatoryPaymentDate,
     overdueMandatoryPayments,
     uiStates,
     primaryState: uiStates[0],
@@ -178,6 +265,49 @@ export function calculateSnapshot(state: FinanceState, today: ISODate = todayISO
     totalAllocated,
     unallocatedSavings,
     cushion
+  };
+}
+
+function calculateSavingsPaceStats(state: FinanceState, today: ISODate) {
+  const operations = [
+    ...state.transfersToSavings
+      .filter((transfer) => !transfer.planned)
+      .map((transfer) => ({
+        date: transfer.date,
+        delta: transfer.amount
+      })),
+    ...state.withdrawalsFromSavings.map((withdrawal) => ({
+      date: withdrawal.date,
+      delta: -withdrawal.amount
+    }))
+  ]
+    .filter((operation) => compareDates(operation.date, today) <= 0)
+    .sort((a, b) => compareDates(a.date, b.date));
+
+  if (operations.length === 0) {
+    return {
+      movementCount: 0,
+      spanDays: 0,
+      monthlyPace: 0
+    };
+  }
+
+  const firstDate = operations[0].date;
+  const spanDays = Math.max(0, daysBetween(firstDate, today));
+  const netMovement = operations.reduce((sum, operation) => sum + operation.delta, 0);
+
+  if (spanDays < 7) {
+    return {
+      movementCount: operations.length,
+      spanDays,
+      monthlyPace: 0
+    };
+  }
+
+  return {
+    movementCount: operations.length,
+    spanDays,
+    monthlyPace: netMovement / monthsBetween(firstDate, today)
   };
 }
 
@@ -348,9 +478,9 @@ export function stateLabel(state: InterfaceState) {
 
 export function stateText(state: InterfaceState, nextMandatoryPayment?: MandatoryPayment) {
   const values: Record<InterfaceState, string> = {
-    normal: "Доступно больше чем на 1 день комфортного запаса.",
-    tight: "Денег хватает, но коридор узкий.",
-    "cash-risk": "Доступно 0 или меньше 0. Нужна реакция.",
+    normal: "Денег хватает на сегодня и ближайшие обязательства.",
+    tight: "Денег хватает, но запас небольшой.",
+    "cash-risk": "После платежей и подушки денег не хватает. Нужна реакция.",
     "payday-arrived": "Сегодня ожидается выплата. Подтвердите и запустите новый цикл.",
     "payment-due-tomorrow": nextMandatoryPayment
       ? `${nextMandatoryPayment.title}: сумма уже учтена в лимите, оплату отметьте отдельно.`

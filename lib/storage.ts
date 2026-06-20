@@ -109,6 +109,10 @@ function toNumber(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function optionalPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 function migrateV4ToV5(prev: Record<string, unknown>): FinanceState {
   const migrationDate = todayISO();
   const prevCredits = Array.isArray(prev.credits) ? (prev.credits as Record<string, unknown>[]) : [];
@@ -117,6 +121,7 @@ function migrateV4ToV5(prev: Record<string, unknown>): FinanceState {
     title: typeof credit.title === "string" ? credit.title : "Кредит",
     openedAt: typeof credit.openedAt === "string" ? credit.openedAt : migrationDate,
     openingBalance: toNumber(credit.openingBalance, toNumber(credit.balance)),
+    creditLimit: optionalPositiveNumber(credit.creditLimit),
     note: typeof credit.note === "string" ? credit.note : undefined,
     isClosed: Boolean(credit.isClosed),
     order: toNumber(credit.order, (index + 1) * 10)
@@ -130,22 +135,73 @@ function migrateV4ToV5(prev: Record<string, unknown>): FinanceState {
   } as unknown as FinanceState;
 }
 
+function migrateV5ToV6(prev: Record<string, unknown>): FinanceState {
+  return {
+    ...prev,
+    schemaVersion: 6,
+    dailyChecks: Array.isArray(prev.dailyChecks) ? prev.dailyChecks : []
+  } as unknown as FinanceState;
+}
+
+function normalizeFinanceState(state: FinanceState): FinanceState {
+  const operationalBalance = Math.max(0, toNumber(state.operationalBalance));
+  const desiredReserveAmount = Math.max(0, toNumber(state.settings.reserveAmount, state.reserve.amount));
+  const reserveAmount = Math.min(desiredReserveAmount, operationalBalance);
+
+  return {
+    ...state,
+    operationalBalance,
+    settings: {
+      ...state.settings,
+      reserveAmount: desiredReserveAmount
+    },
+    reserve: {
+      ...state.reserve,
+      amount: reserveAmount
+    },
+    credits: Array.isArray(state.credits)
+      ? state.credits.map((credit) => ({
+          ...credit,
+          openingBalance: Math.max(0, toNumber(credit.openingBalance)),
+          creditLimit: optionalPositiveNumber(credit.creditLimit)
+        }))
+      : []
+  };
+}
+
 function migrateStoredState(parsed: unknown): FinanceState | null {
   if (!parsed || typeof parsed !== "object") return null;
   const record = parsed as Record<string, unknown>;
-  if (record.schemaVersion === 5) return parsed as FinanceState;
-  if (record.schemaVersion === 4) return migrateV4ToV5(record);
-  if (record.schemaVersion === 3) return migrateV4ToV5(migrateV3ToV4(record) as unknown as Record<string, unknown>);
+  if (record.schemaVersion === 6) return normalizeFinanceState(parsed as FinanceState);
+  if (record.schemaVersion === 5) return normalizeFinanceState(migrateV5ToV6(record));
+  if (record.schemaVersion === 4) {
+    return normalizeFinanceState(migrateV5ToV6(migrateV4ToV5(record) as unknown as Record<string, unknown>));
+  }
+  if (record.schemaVersion === 3) {
+    return normalizeFinanceState(
+      migrateV5ToV6(
+        migrateV4ToV5(migrateV3ToV4(record) as unknown as Record<string, unknown>) as unknown as Record<string, unknown>
+      )
+    );
+  }
   if (record.schemaVersion === 2) {
-    return migrateV4ToV5(
-      migrateV3ToV4(migrateV2ToV3(record) as unknown as Record<string, unknown>) as unknown as Record<string, unknown>
+    return normalizeFinanceState(
+      migrateV5ToV6(
+        migrateV4ToV5(
+        migrateV3ToV4(migrateV2ToV3(record) as unknown as Record<string, unknown>) as unknown as Record<string, unknown>
+        ) as unknown as Record<string, unknown>
+      )
     );
   }
   if (record.schemaVersion === 1) {
-    return migrateV4ToV5(
-      migrateV3ToV4(
-        migrateV2ToV3(migrateV1ToV2(record)) as unknown as Record<string, unknown>
-      ) as unknown as Record<string, unknown>
+    return normalizeFinanceState(
+      migrateV5ToV6(
+        migrateV4ToV5(
+        migrateV3ToV4(
+          migrateV2ToV3(migrateV1ToV2(record)) as unknown as Record<string, unknown>
+        ) as unknown as Record<string, unknown>
+        ) as unknown as Record<string, unknown>
+      )
     );
   }
   return null;

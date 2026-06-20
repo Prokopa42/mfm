@@ -21,7 +21,8 @@ import type {
   ExpensePaymentSource,
   IncomeKind,
   Rubric,
-  RubricScope
+  RubricScope,
+  SavingsGoal
 } from "@/lib/types";
 import { formatMoney, numberFromInput } from "@/lib/utils";
 
@@ -45,8 +46,10 @@ interface ActionDialogsProps {
   active: ActionDialogKind;
   snapshot: CalculationSnapshot;
   rubrics: Rubric[];
+  goals: SavingsGoal[];
   credits: Credit[];
   creditEvents: CreditEvent[];
+  operationalBalance: number;
   onOpenChange: (value: ActionDialogKind) => void;
   onExpense: (payload: ActionPayload) => void;
   onIncome: (payload: ActionPayload) => void;
@@ -67,8 +70,10 @@ export function ActionDialogs({
   active,
   snapshot,
   rubrics,
+  goals,
   credits,
   creditEvents,
+  operationalBalance,
   onOpenChange,
   onExpense,
   onIncome,
@@ -88,8 +93,10 @@ export function ActionDialogs({
         defaultTitle=""
         defaultDate={today}
         rubrics={rubrics}
+        goals={goals}
         credits={credits}
         creditEvents={creditEvents}
+        operationalBalance={operationalBalance}
         submitLabel="Записать расход"
         onOpenChange={(open) => onOpenChange(open ? "expense" : null)}
         onSubmit={(payload) => {
@@ -105,8 +112,10 @@ export function ActionDialogs({
         defaultTitle=""
         defaultDate={today}
         rubrics={rubrics}
+        goals={goals}
         credits={credits}
         creditEvents={creditEvents}
+        operationalBalance={operationalBalance}
         submitLabel="Записать доход"
         showIncomeKind
         onOpenChange={(open) => onOpenChange(open ? "income" : null)}
@@ -123,8 +132,10 @@ export function ActionDialogs({
         defaultTitle="В накопления"
         defaultDate={today}
         rubrics={rubrics}
+        goals={goals}
         credits={credits}
         creditEvents={creditEvents}
+        operationalBalance={operationalBalance}
         submitLabel="В накопления"
         showPlanned
         onOpenChange={(open) => onOpenChange(open ? "transfer" : null)}
@@ -141,8 +152,10 @@ export function ActionDialogs({
         defaultTitle="Снятие с накоплений"
         defaultDate={today}
         rubrics={rubrics}
+        goals={goals}
         credits={credits}
         creditEvents={creditEvents}
+        operationalBalance={operationalBalance}
         submitLabel="Снять с накоплений"
         onOpenChange={(open) => onOpenChange(open ? "withdraw" : null)}
         onSubmit={(payload) => {
@@ -164,8 +177,10 @@ interface MoneyDialogProps {
   defaultTitle: string;
   defaultDate: string;
   rubrics: Rubric[];
+  goals: SavingsGoal[];
   credits: Credit[];
   creditEvents: CreditEvent[];
+  operationalBalance: number;
   submitLabel: string;
   showPlanned?: boolean;
   showIncomeKind?: boolean;
@@ -181,8 +196,10 @@ function MoneyDialog({
   defaultTitle,
   defaultDate,
   rubrics,
+  goals,
   credits,
   creditEvents,
+  operationalBalance,
   submitLabel,
   showPlanned = false,
   showIncomeKind = false,
@@ -207,6 +224,17 @@ function MoneyDialog({
   );
   const [paymentSource, setPaymentSource] = useState<ExpensePaymentSource>("own");
   const [linkedCreditId, setLinkedCreditId] = useState("");
+  const activeGoals = useMemo(
+    () =>
+      goals
+        .slice()
+        .sort((a, b) => a.priority - b.priority || a.title.localeCompare(b.title, "ru")),
+    [goals]
+  );
+  const selectedRubric = rubricOptions.find((rubric) => rubric.id === categoryId);
+  const isGoalTransfer = mode === "transfer" && isGoalTransferRubric(selectedRubric);
+  const [linkedGoalId, setLinkedGoalId] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -215,8 +243,11 @@ function MoneyDialog({
       setCategoryId(rubricOptions[0]?.id);
       setPaymentSource("own");
       setLinkedCreditId("");
+      setLinkedGoalId("");
+      setError(null);
       return;
     }
+    setError(null);
     setCategoryId((current) => {
       if (current && rubricOptions.some((rubric) => rubric.id === current)) return current;
       return rubricOptions[0]?.id;
@@ -227,19 +258,47 @@ function MoneyDialog({
         return activeCredits[0]?.id ?? "";
       });
     }
-  }, [activeCredits, mode, open, paymentSource, rubricOptions]);
+    if (isGoalTransfer) {
+      setLinkedGoalId((current) => {
+        if (current && activeGoals.some((goal) => goal.id === current)) return current;
+        return activeGoals[0]?.id ?? "";
+      });
+    } else {
+      setLinkedGoalId("");
+    }
+  }, [activeCredits, activeGoals, isGoalTransfer, mode, open, paymentSource, rubricOptions]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const amount = numberFromInput(form.get("amount"));
     if (amount <= 0) return;
+    const spendsOwnMoney =
+      (mode === "expense" && paymentSource === "own") ||
+      (mode === "transfer" && !planned);
+    if (spendsOwnMoney && amount > operationalBalance) {
+      setError(`В оперативном остатке ${formatMoney(operationalBalance)} ₽. Уменьшите сумму или выберите другой способ.`);
+      return;
+    }
+    if (isGoalTransfer && activeGoals.length === 0) {
+      setError("Целей пока нет. Создайте цель на вкладке «Накопления» или выберите «Общий котёл».");
+      return;
+    }
+    const goal = isGoalTransfer
+      ? activeGoals.find((item) => item.id === linkedGoalId) ?? activeGoals[0]
+      : undefined;
+    const titleFromForm = textFromForm(form.get("title"));
+    const titleForSubmit =
+      goal && (!titleFromForm || titleFromForm === defaultTitle)
+        ? `На цель: ${goal.title}`
+        : titleFromForm || defaultTitle || undefined;
 
     onSubmit({
       amount,
       date: String(form.get("date") || defaultDate),
       categoryId,
-      title: textFromForm(form.get("title")) || defaultTitle || undefined,
+      linkedGoalId: goal?.id,
+      title: titleForSubmit,
       note: textFromForm(form.get("note")),
       planned: showPlanned ? planned : undefined,
       paymentSource: mode === "expense" ? paymentSource : undefined,
@@ -284,7 +343,10 @@ function MoneyDialog({
                   id={`${title}-category`}
                   value={categoryId ?? rubricOptions[0]?.id}
                   rubrics={rubricOptions}
-                  onChange={setCategoryId}
+                  onChange={(value) => {
+                    setCategoryId(value);
+                    setError(null);
+                  }}
                 />
               ) : (
                 <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-55)" }}>
@@ -306,6 +368,7 @@ function MoneyDialog({
                       setPaymentSource("credit");
                       setLinkedCreditId(value);
                     }
+                    setError(null);
                   }}
                   style={{
                     width: "100%",
@@ -327,8 +390,48 @@ function MoneyDialog({
                   ))}
                 </select>
                 <div className="mono" style={{ fontSize: 8.5, lineHeight: 1.45, color: "var(--ink-55)" }}>
-                  Кредитный расход попадёт в историю как расход, но не уменьшит оперативный остаток.
+                  Покупка с кредитки увеличит долг по выбранной карте.
                 </div>
+              </Field>
+            )}
+            {isGoalTransfer && (
+              <Field id={`${title}-goal`} label="Цель">
+                {activeGoals.length > 0 ? (
+                  <>
+                    <select
+                      id={`${title}-goal`}
+                      value={linkedGoalId || activeGoals[0]?.id || ""}
+                      onChange={(event) => {
+                        setLinkedGoalId(event.currentTarget.value);
+                        setError(null);
+                      }}
+                      style={{
+                        width: "100%",
+                        minHeight: 38,
+                        border: "0.5px solid var(--ink-80)",
+                        borderRadius: 0,
+                        background: "var(--paper)",
+                        color: "var(--ink)",
+                        padding: "0 8px",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 11
+                      }}
+                    >
+                      {activeGoals.map((goal) => (
+                        <option key={goal.id} value={goal.id}>
+                          {goal.title} · {formatMoney(goal.allocated)} ₽ / {formatMoney(goal.target)} ₽
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mono" style={{ marginTop: 4, fontSize: 8.5, lineHeight: 1.45, color: "var(--ink-55)" }}>
+                      Деньги попадут в общий котёл и сразу закрепятся за выбранной целью.
+                    </div>
+                  </>
+                ) : (
+                  <div className="mono" style={{ fontSize: 9, color: "var(--red)", lineHeight: 1.45 }}>
+                    Целей пока нет. Для обычного перевода выберите рубрику «Общий котёл».
+                  </div>
+                )}
               </Field>
             )}
             {showIncomeKind && (
@@ -375,6 +478,11 @@ function MoneyDialog({
             <Field id={`${title}-note`} label="Комментарий">
               <Textarea id={`${title}-note`} name="note" />
             </Field>
+            {error && (
+              <div className="mono" style={{ fontSize: 9, lineHeight: 1.45, color: "var(--red)" }}>
+                {error}
+              </div>
+            )}
           </DialogBody>
           {/* Submit — full-width ink CTA, mirrors CTARow primary button */}
           <button
@@ -426,6 +534,12 @@ function rubricsForScope(rubrics: Rubric[], scope: RubricScope, includeArchived:
     .filter((rubric) => rubric.scope === scope && (includeArchived || !rubric.isArchived))
     .slice()
     .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, "ru"));
+}
+
+function isGoalTransferRubric(rubric?: Rubric) {
+  if (!rubric) return false;
+  const title = rubric.title.trim().toLowerCase().replace(/ё/g, "е");
+  return title === "на цель" || title.includes("цель");
 }
 
 function creditEventEffect(event: CreditEvent) {

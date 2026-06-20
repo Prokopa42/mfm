@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS: CalculationSettings = {
   payday2: 20,
   typicalPaycheck1: 100000,
   typicalPaycheck2: 100000,
-  reserveAmount: 2000,
+  reserveAmount: 0,
   purchasingPowerCoef: 0.9,
   rounding: "day",
   includeTodayInDivisor: true,
@@ -44,7 +44,7 @@ export const DEFAULT_RUBRICS: Rubric[] = [
 export function createInitialState(today = todayISO()): FinanceState {
   const cycle = getCurrentCycleBounds(today, DEFAULT_SETTINGS);
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     operationalBalance: 0,
     payCycle: {
       id: "cycle_current",
@@ -59,14 +59,15 @@ export function createInitialState(today = todayISO()): FinanceState {
     credits: [],
     creditEvents: [],
     variableExpenses: [],
+    dailyChecks: [],
     reserve: {
       amount: DEFAULT_SETTINGS.reserveAmount,
       policy: "flat"
     },
     savings: {
-      balance: 50000,
+      balance: 0,
       openedAt: today,
-      baselineBalance: 50000,
+      baselineBalance: 0,
       cushion: { allocated: 0, target: 0 }
     },
     transfersToSavings: [],
