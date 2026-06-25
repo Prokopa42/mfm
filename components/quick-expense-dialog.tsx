@@ -97,7 +97,7 @@ export function QuickExpenseDialog({
       return;
     }
     if (mode === "credit-payment" && parsed > selectedCreditDebt) {
-      setError(`Текущий долг по карте ${formatMoney(selectedCreditDebt)} ₽. Платёж не может быть больше долга.`);
+      setError(`Текущий долг ${formatMoney(selectedCreditDebt)} ₽. Платёж не может быть больше долга.`);
       return;
     }
 
@@ -121,7 +121,7 @@ export function QuickExpenseDialog({
         <DialogHeader>
           <DialogTitle>Записать расход</DialogTitle>
           <DialogDescription>
-            Выберите, что произошло: трата своими деньгами, трата с кредитки или платёж по кредитной карте.
+            Выберите, что произошло: расход своими деньгами, расход в долг или погашение долга.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
@@ -141,12 +141,12 @@ export function QuickExpenseDialog({
                 autoFocus
               />
             </Field>
-            <Field label="Источник">
+            <Field label="Что записать">
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", border: "0.5px solid var(--ink-80)" }}>
                 {([
                   ["own", "Свои"],
-                  ["credit", "Кредитка"],
-                  ["credit-payment", "Платёж карты"]
+                  ["credit", "В долг"],
+                  ["credit-payment", "Погасить долг"]
                 ] as Array<[QuickExpenseMode, string]>).map(([value, label], index) => {
                   const selected = mode === value;
                   return (
@@ -177,7 +177,7 @@ export function QuickExpenseDialog({
               </div>
             </Field>
             {(mode === "credit" || mode === "credit-payment") && (
-              <Field label="Карта">
+              <Field label={mode === "credit-payment" ? "Какой долг погасить" : "Какой долг увеличить"}>
                 {activeCredits.length > 0 ? (
                   <select
                     value={creditId}
@@ -206,12 +206,12 @@ export function QuickExpenseDialog({
                   </select>
                 ) : (
                   <div className="mono" style={{ fontSize: 9, color: "var(--red)", lineHeight: 1.45 }}>
-                    Нет активных кредитных карт. Сначала добавьте кредит на вкладке «Цикл».
+                    Нет активных долговых обязательств. Сначала добавьте долг на вкладке «Цикл».
                   </div>
                 )}
                 {mode === "credit-payment" && activeCredits.length > 0 && (
                   <div className="mono" style={{ marginTop: 4, fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
-                    Платёж уменьшит оперативный остаток и долг по выбранной карте.
+                    Погашение уменьшит оперативный остаток и долг.
                   </div>
                 )}
               </Field>
@@ -220,11 +220,15 @@ export function QuickExpenseDialog({
               <Textarea value={note} onChange={(event) => setNote(event.currentTarget.value)} placeholder="Необязательно" />
             </Field>
             <div className="mono" style={{ fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
-              Свои расходы: {formatMoney(quickSpent)} ₽. Кредитные покупки: {formatMoney(creditSpent)} ₽.
-              {creditPaid > 0 ? ` Платежи по картам: ${formatMoney(creditPaid)} ₽.` : ""}
-              {check?.eveningBalance === undefined
-                ? " Если вечерний остаток не внесён, МФМ покажет расчётный вечер."
-                : " Ручной вечерний остаток уже остаётся источником правды."}
+              Свои расходы: {formatMoney(quickSpent)} ₽. Расходы в долг: {formatMoney(creditSpent)} ₽.
+              {creditPaid > 0 ? ` Погашение долга: ${formatMoney(creditPaid)} ₽.` : ""}
+              {check?.eveningBalance !== undefined
+                ? " Ручной вечерний остаток уже остаётся источником правды."
+                : mode === "credit"
+                  ? " Расход в долг обновит факт дня и долг, но не изменит остаток своих денег."
+                  : mode === "credit-payment"
+                    ? " Погашение долга уменьшит остаток своих денег и расчётный вечер."
+                    : " Если вечерний остаток не внесён, МФМ покажет расчётный вечер."}
             </div>
             {error && (
               <div className="mono" style={{ fontSize: 9, color: "var(--red)", lineHeight: 1.45 }}>

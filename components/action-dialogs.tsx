@@ -37,6 +37,7 @@ export interface ActionPayload {
   note?: string;
   planned?: boolean;
   linkedGoalId?: string;
+  linkedSavingsBucket?: "cushion";
   paymentSource?: ExpensePaymentSource;
   linkedCreditId?: string;
   kind?: IncomeKind;
@@ -233,6 +234,7 @@ function MoneyDialog({
   );
   const selectedRubric = rubricOptions.find((rubric) => rubric.id === categoryId);
   const isGoalTransfer = mode === "transfer" && isGoalTransferRubric(selectedRubric);
+  const isCushionTransfer = mode === "transfer" && isCushionTransferRubric(selectedRubric);
   const [linkedGoalId, setLinkedGoalId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -291,6 +293,8 @@ function MoneyDialog({
     const titleForSubmit =
       goal && (!titleFromForm || titleFromForm === defaultTitle)
         ? `На цель: ${goal.title}`
+        : isCushionTransfer && (!titleFromForm || titleFromForm === defaultTitle)
+          ? "В копилку"
         : titleFromForm || defaultTitle || undefined;
 
     onSubmit({
@@ -298,6 +302,7 @@ function MoneyDialog({
       date: String(form.get("date") || defaultDate),
       categoryId,
       linkedGoalId: goal?.id,
+      linkedSavingsBucket: isCushionTransfer ? "cushion" : undefined,
       title: titleForSubmit,
       note: textFromForm(form.get("note")),
       planned: showPlanned ? planned : undefined,
@@ -390,7 +395,7 @@ function MoneyDialog({
                   ))}
                 </select>
                 <div className="mono" style={{ fontSize: 8.5, lineHeight: 1.45, color: "var(--ink-55)" }}>
-                  Покупка с кредитки увеличит долг по выбранной карте.
+                  Расход в долг увеличит выбранное долговое обязательство.
                 </div>
               </Field>
             )}
@@ -433,6 +438,11 @@ function MoneyDialog({
                   </div>
                 )}
               </Field>
+            )}
+            {isCushionTransfer && (
+              <div className="mono" style={{ marginTop: -4, fontSize: 8.5, lineHeight: 1.45, color: "var(--ink-55)" }}>
+                Деньги попадут в общий котёл накоплений и сразу будут помечены как копилка.
+              </div>
             )}
             {showIncomeKind && (
               <Field id={`${title}-kind`} label="Тип дохода">
@@ -540,6 +550,12 @@ function isGoalTransferRubric(rubric?: Rubric) {
   if (!rubric) return false;
   const title = rubric.title.trim().toLowerCase().replace(/ё/g, "е");
   return title === "на цель" || title.includes("цель");
+}
+
+function isCushionTransferRubric(rubric?: Rubric) {
+  if (!rubric) return false;
+  const title = rubric.title.trim().toLowerCase().replace(/ё/g, "е");
+  return rubric.id === "rubric_transfer_cushion" || title === "копилка";
 }
 
 function creditEventEffect(event: CreditEvent) {

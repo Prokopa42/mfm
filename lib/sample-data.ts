@@ -28,7 +28,8 @@ export const DEFAULT_RUBRICS: Rubric[] = [
   { id: "rubric_income_other", title: "Прочее", scope: "income", order: 40, isArchived: false },
 
   { id: "rubric_transfer_general", title: "Общий котёл", scope: "transfer", order: 10, isArchived: false },
-  { id: "rubric_transfer_goal", title: "На цель", scope: "transfer", order: 20, isArchived: false },
+  { id: "rubric_transfer_cushion", title: "Копилка", scope: "transfer", order: 20, isArchived: false },
+  { id: "rubric_transfer_goal", title: "На цель", scope: "transfer", order: 30, isArchived: false },
 
   { id: "rubric_withdraw_need", title: "Нужное", scope: "withdraw", order: 10, isArchived: false },
   { id: "rubric_withdraw_emergency", title: "Срочно", scope: "withdraw", order: 20, isArchived: false },
@@ -37,7 +38,7 @@ export const DEFAULT_RUBRICS: Rubric[] = [
   { id: "rubric_payment_connection", title: "Связь", scope: "mandatory-payment", order: 20, isArchived: false },
   { id: "rubric_payment_sport", title: "Спорт", scope: "mandatory-payment", order: 30, isArchived: false },
   { id: "rubric_payment_subscriptions", title: "Подписки", scope: "mandatory-payment", order: 40, isArchived: false },
-  { id: "rubric_payment_credit", title: "Кредит", scope: "mandatory-payment", order: 50, isArchived: false },
+  { id: "rubric_payment_credit", title: "Долг", scope: "mandatory-payment", order: 50, isArchived: false },
   { id: "rubric_payment_other", title: "Прочее", scope: "mandatory-payment", order: 60, isArchived: false }
 ];
 

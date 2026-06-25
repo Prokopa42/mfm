@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { calculateDailyCheckOutcome } from "@/lib/calculations";
 import { todayISO } from "@/lib/dates";
 import { createInitialState, DEFAULT_RUBRICS } from "@/lib/sample-data";
-import type { FinanceState, Rubric, RubricScope } from "@/lib/types";
+import type { DailyCheck, FinanceState, Rubric, RubricScope } from "@/lib/types";
 
 const STORAGE_KEY = "mfm.finance-state.v1";
 const TEMP_DEMO_STORAGE_KEY = "mfm.finance-state.v1.demo-savings-pass-1";
@@ -113,12 +114,42 @@ function optionalPositiveNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+function optionalNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeDailyCheck(check: DailyCheck): DailyCheck {
+  const normalized: DailyCheck = {
+    ...check,
+    morningBalance: optionalNumber(check.morningBalance),
+    eveningBalance: optionalNumber(check.eveningBalance),
+    incomeAmount: optionalNumber(check.incomeAmount),
+    transferToSavingsAmount: optionalNumber(check.transferToSavingsAmount),
+    withdrawalFromSavingsAmount: optionalNumber(check.withdrawalFromSavingsAmount),
+    mandatoryPaidAmount: optionalNumber(check.mandatoryPaidAmount),
+    quickSpentAmount: optionalNumber(check.quickSpentAmount),
+    creditSpentAmount: optionalNumber(check.creditSpentAmount),
+    creditPaymentAmount: optionalNumber(check.creditPaymentAmount),
+    plannedLimit: Math.max(0, toNumber(check.plannedLimit))
+  };
+  const outcome = calculateDailyCheckOutcome(normalized);
+
+  return {
+    ...normalized,
+    grossOutflow: outcome.grossOutflow,
+    freeSpent: outcome.freeSpent,
+    delta: outcome.delta,
+    calculatedEveningBalance: outcome.calculatedEveningBalance,
+    status: outcome.status
+  };
+}
+
 function migrateV4ToV5(prev: Record<string, unknown>): FinanceState {
   const migrationDate = todayISO();
   const prevCredits = Array.isArray(prev.credits) ? (prev.credits as Record<string, unknown>[]) : [];
   const credits = prevCredits.map((credit, index) => ({
     id: typeof credit.id === "string" ? credit.id : `credit_migrated_${index + 1}`,
-    title: typeof credit.title === "string" ? credit.title : "Кредит",
+    title: typeof credit.title === "string" ? credit.title : "Долг",
     openedAt: typeof credit.openedAt === "string" ? credit.openedAt : migrationDate,
     openingBalance: toNumber(credit.openingBalance, toNumber(credit.balance)),
     creditLimit: optionalPositiveNumber(credit.creditLimit),
@@ -147,9 +178,22 @@ function normalizeFinanceState(state: FinanceState): FinanceState {
   const operationalBalance = Math.max(0, toNumber(state.operationalBalance));
   const desiredReserveAmount = Math.max(0, toNumber(state.settings.reserveAmount, state.reserve.amount));
   const reserveAmount = Math.min(desiredReserveAmount, operationalBalance);
+  const rubrics = Array.isArray(state.rubrics) ? [...state.rubrics] : [];
+
+  DEFAULT_RUBRICS.forEach((rubric) => {
+    if (!rubrics.some((item) => item.id === rubric.id)) {
+      rubrics.push({ ...rubric });
+    }
+  });
+  const normalizedRubrics = rubrics.map((rubric) =>
+    rubric.id === "rubric_payment_credit" && rubric.title === "Кредит"
+      ? { ...rubric, title: "Долг" }
+      : rubric
+  );
 
   return {
     ...state,
+    rubrics: normalizedRubrics,
     operationalBalance,
     settings: {
       ...state.settings,
@@ -159,6 +203,9 @@ function normalizeFinanceState(state: FinanceState): FinanceState {
       ...state.reserve,
       amount: reserveAmount
     },
+    dailyChecks: Array.isArray(state.dailyChecks)
+      ? state.dailyChecks.map((check) => normalizeDailyCheck(check))
+      : [],
     credits: Array.isArray(state.credits)
       ? state.credits.map((credit) => ({
           ...credit,

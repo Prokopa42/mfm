@@ -1,5 +1,6 @@
 "use client";
 
+import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
 import type { ActionDialogKind } from "@/components/action-dialogs";
 import type { DailyCheckDialogMode } from "@/components/daily-check-dialog";
@@ -13,7 +14,8 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { getDailyCheck, stateLabel, stateText } from "@/lib/calculations";
+import { Input } from "@/components/ui/input";
+import { calculateDailyCheckOutcome, getDailyCheck, stateLabel, stateText } from "@/lib/calculations";
 import { addDays, daysBetween, formatShortDate, parseISODate } from "@/lib/dates";
 import type {
   CalculationSnapshot,
@@ -32,6 +34,7 @@ interface TodayScreenProps {
   onDailyCheck: (mode: DailyCheckDialogMode) => void;
   onQuickExpense: () => void;
   onConfirmPaycheck: () => void;
+  onReserveChange: (amount: number) => void;
 }
 
 const RU_DOW = ["ВС", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -52,7 +55,7 @@ const REASON_LABELS: Record<DailyCheckReason, string> = {
   other: "другое"
 };
 
-type TodayInfoTopic = "spent" | "free" | "reserve" | "pace" | "operational" | "savings";
+type TodayInfoTopic = "spent" | "free" | "reserve" | "pace" | "operational" | "savings" | "day";
 
 function dateBits(iso: string) {
   const d = parseISODate(iso);
@@ -87,36 +90,43 @@ function dailyStatusText(check?: DailyCheck) {
     };
   }
   if (check.eveningBalance === undefined) {
-    if (((check.quickSpentAmount ?? 0) > 0 || (check.creditSpentAmount ?? 0) > 0) && check.calculatedEveningBalance !== undefined) {
+    if (check.calculatedEveningBalance !== undefined) {
       return {
-        title: check.status === "ok" ? "День идёт в лимите" : "Есть отклонение",
+        title: "Расчётный остаток обновлён",
         note: `Расчётный вечерний остаток ${formatMoney(check.calculatedEveningBalance)} ₽. Ручной вечер всё ещё можно внести.`,
         kind: check.status === "risk" ? "warning" as const : "info" as const
       };
     }
+    if ((check.creditSpentAmount ?? 0) > 0) {
+      return {
+        title: "Расход в долг записан",
+        note: "Факт дня и долг обновлены. Остаток своих денег не менялся; вечерний остаток внесите вручную.",
+        kind: check.status === "risk" ? "warning" as const : "info" as const
+      };
+    }
     return {
-      title: "План дня зафиксирован",
+      title: "Ориентир дня зафиксирован",
       note: "Вечером внесите остаток, чтобы закрыть день.",
       kind: "info" as const
     };
   }
   if (check.status === "ok") {
     return {
-      title: "День закрыт в лимите",
-      note: "Факт дня не вышел за безопасный дневной маршрут.",
+      title: "День закрыт",
+      note: "Расход дня не превысил ориентир.",
       kind: "success" as const
     };
   }
   if (check.status === "warning") {
     return {
-      title: "Есть отклонение от лимита",
-      note: "Перерасход будет распределён на оставшиеся дни цикла.",
+      title: "Есть перерасход",
+      note: "Расход дня выше ориентира.",
       kind: "notice" as const
     };
   }
   return {
     title: "Риск по маршруту",
-    note: "Факт дня сильно выше плана. Проверьте обязательства до зарплаты.",
+    note: "Расход дня сильно выше ориентира. Проверьте обязательства до зарплаты.",
     kind: "warning" as const
   };
 }
@@ -202,33 +212,6 @@ function Hero({
         <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.35 }}>
           {availableText} · {remainingDays} дн.
         </div>
-      </div>
-    </section>
-  );
-}
-
-function FormulaPanel({
-  state,
-  snapshot
-}: {
-  state: FinanceState;
-  snapshot: CalculationSnapshot;
-}) {
-  return (
-    <section style={{ padding: "6px var(--pad-x) 8px", borderTop: "1px solid var(--hair)" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span className="eyebrow">Как считается</span>
-        <div style={{ flex: 1, height: 0.5, background: "var(--hair)" }} />
-        <span className="mono" style={{ fontSize: 8.8, color: "var(--ink-55)" }}>
-          формула
-        </span>
-      </div>
-      <div className="mono" style={{ marginTop: 6, fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
-        Оперативный {formatMoney(state.operationalBalance)} ₽ − платежи до зарплаты{" "}
-        {formatMoney(snapshot.mandatoryPaymentsBeforeNextPaycheck)} ₽ − подушка {formatMoney(state.reserve.amount)} ₽
-        {snapshot.plannedSavingsTransfersBeforeNextPaycheck > 0
-          ? ` − план в накопления ${formatMoney(snapshot.plannedSavingsTransfersBeforeNextPaycheck)} ₽`
-          : ""}
       </div>
     </section>
   );
@@ -453,7 +436,7 @@ function CheckCell({
   );
 }
 
-function DaySummary({ check }: { check?: DailyCheck }) {
+function DaySummary({ check, onExplain }: { check?: DailyCheck; onExplain: (topic: TodayInfoTopic) => void }) {
   if (
     !check ||
     (check.eveningBalance === undefined &&
@@ -462,40 +445,62 @@ function DaySummary({ check }: { check?: DailyCheck }) {
       (check.creditPaymentAmount ?? 0) <= 0)
   ) return null;
 
-  const delta = check.delta ?? 0;
-  const deltaColor = delta >= 0 ? "var(--blue)" : "var(--red)";
+  const outcome = calculateDailyCheckOutcome(check);
+  const totalSpent = outcome.freeSpent ?? check.freeSpent ?? 0;
+  const overpay = Math.max(0, totalSpent - check.plannedLimit);
   const eveningLabel = check.eveningBalance === undefined ? "расчётный вечер" : "вечер подтверждён";
+  const reasonText = check.reason ? REASON_LABELS[check.reason] : "";
+  const noteParts = [
+    eveningLabel,
+    reasonText ? `причина: ${reasonText}` : "",
+    check.note
+  ].filter(Boolean);
 
   return (
     <section style={{ padding: "10px var(--pad-x)", borderTop: "1px solid var(--hair)" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span className="eyebrow eyebrow--ink">Факт дня</span>
+        <button
+          type="button"
+          className="tap-highlight eyebrow eyebrow--ink"
+          onClick={() => onExplain("day")}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: "var(--ink)",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            padding: 0,
+            textAlign: "left"
+          }}
+        >
+          Итог дня
+        </button>
         <div style={{ flex: 1, height: 0.5, background: "var(--hair)" }} />
+        <button
+          type="button"
+          className="tap-highlight mono"
+          onClick={() => onExplain("day")}
+          style={{
+            border: "none",
+            background: "transparent",
+            color: "var(--ink-55)",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: 9,
+            padding: 0,
+            textAlign: "right"
+          }}
+        >
+          ?
+        </button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 9 }}>
-        <Metric label="план" value={check.plannedLimit} />
-        <Metric label="факт" value={check.freeSpent ?? 0} />
-        <Metric label="отклонение" value={delta} color={deltaColor} signed />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 9 }}>
+        <Metric label="всего за день" value={totalSpent} />
+        <Metric label="переплата" value={overpay} color={overpay > 0 ? "var(--red)" : "var(--ink)"} />
       </div>
-      <div className="mono" style={{ marginTop: 7, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.45 }}>
-        {eveningLabel}
-        {check.calculatedEveningBalance !== undefined && check.eveningBalance === undefined
-          ? `: ${formatMoney(check.calculatedEveningBalance)} ₽`
-          : ""}
-        {(check.quickSpentAmount ?? 0) > 0 ? ` · свои расходы ${formatMoney(check.quickSpentAmount ?? 0)} ₽` : ""}
-        {(check.creditSpentAmount ?? 0) > 0 ? ` · кредитка ${formatMoney(check.creditSpentAmount ?? 0)} ₽` : ""}
-        {(check.creditPaymentAmount ?? 0) > 0 ? ` · платёж по карте ${formatMoney(check.creditPaymentAmount ?? 0)} ₽` : ""}
-      </div>
-      {check.quickSpentEntries && check.quickSpentEntries.length > 0 && (
-        <div className="mono" style={{ marginTop: 5, fontSize: 8.8, color: "var(--ink-55)", lineHeight: 1.45 }}>
-          {check.quickSpentEntries.slice(-3).map((entry) => `${formatMoney(entry.amount)} ₽${entry.operation === "credit-payment" ? " платёж по карте" : entry.paymentSource === "credit" ? " кредитка" : ""}${entry.note ? ` — ${entry.note}` : ""}`).join(" · ")}
-        </div>
-      )}
-      {(check.reason || check.note) && (
+      {noteParts.length > 0 && (
         <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.45 }}>
-          {check.reason ? `Причина: ${REASON_LABELS[check.reason]}` : ""}
-          {check.reason && check.note ? " · " : ""}
-          {check.note}
+          {noteParts.join(" · ")}
         </div>
       )}
     </section>
@@ -538,16 +543,18 @@ function Metric({
   label,
   value,
   color = "var(--ink)",
-  signed = false
+  signed = false,
+  onClick
 }: {
   label: string;
   value: number;
   color?: string;
   signed?: boolean;
+  onClick?: () => void;
 }) {
   const sign = signed && value > 0 ? "+" : signed && value < 0 ? "−" : "";
-  return (
-    <div>
+  const content = (
+    <>
       <div className="mono" style={{ fontSize: 9, color: "var(--ink-55)" }}>
         {label}
       </div>
@@ -555,7 +562,32 @@ function Metric({
         {sign}
         {formatMoney(Math.abs(value))}
       </div>
-    </div>
+    </>
+  );
+  if (!onClick) {
+    return (
+      <div>
+        {content}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="tap-highlight"
+      onClick={onClick}
+      style={{
+        border: "none",
+        background: "transparent",
+        color: "var(--ink)",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        padding: 0,
+        textAlign: "left"
+      }}
+    >
+      {content}
+    </button>
   );
 }
 
@@ -636,10 +668,12 @@ function PaymentLine({
 
 function FooterSummary({
   state,
-  onExplain
+  onExplain,
+  onReserveEdit
 }: {
   state: FinanceState;
   onExplain: (topic: TodayInfoTopic) => void;
+  onReserveEdit: () => void;
 }) {
   return (
     <div
@@ -651,9 +685,62 @@ function FooterSummary({
       }}
     >
       <FooterCell label="оперативный" value={state.operationalBalance} onClick={() => onExplain("operational")} />
-      <FooterCell label="подушка" value={state.reserve.amount} onClick={() => onExplain("reserve")} />
+      <FooterCell label="подушка" value={state.reserve.amount} onClick={onReserveEdit} />
       <FooterCell label="накопления" value={state.savings.balance} blue onClick={() => onExplain("savings")} />
     </div>
+  );
+}
+
+function ReserveEditDialog({
+  open,
+  state,
+  onOpenChange,
+  onSubmit
+}: {
+  open: boolean;
+  state: FinanceState;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (amount: number) => void;
+}) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const raw = String(form.get("reserve") ?? "").replace(/\s/g, "").replace(",", ".");
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) return;
+    onSubmit(Math.round(parsed));
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Подушка на сегодня</DialogTitle>
+          <DialogDescription>
+            Это часть оперативных денег, которую ты решил не трогать. Деньги никуда не переводятся.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit}>
+          <DialogBody>
+            <Input
+              name="reserve"
+              inputMode="decimal"
+              defaultValue={String(state.settings.reserveAmount || state.reserve.amount || "")}
+              placeholder="Сумма подушки"
+              autoFocus
+            />
+            <div className="mono" style={{ fontSize: 9.5, lineHeight: 1.45, color: "var(--ink-55)" }}>
+              Сейчас защищено {formatMoney(state.reserve.amount)} ₽ из {formatMoney(state.operationalBalance)} ₽
+              оперативных денег.
+            </div>
+            <Button type="submit" variant="primary" style={{ width: "100%" }}>
+              Сохранить
+            </Button>
+          </DialogBody>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -775,11 +862,13 @@ function TodayInfoDialog({
   topic,
   state,
   snapshot,
+  dailyCheck,
   onOpenChange
 }: {
   topic: TodayInfoTopic | null;
   state: FinanceState;
   snapshot: CalculationSnapshot;
+  dailyCheck?: DailyCheck;
   onOpenChange: (open: boolean) => void;
 }) {
   if (!topic) return null;
@@ -787,6 +876,14 @@ function TodayInfoDialog({
   const plannedSavings = snapshot.plannedSavingsTransfersBeforeNextPaycheck;
   const free = Math.round(snapshot.availableUntilNextPaycheck);
   const paceReady = snapshot.savingsMovementCount > 0 && snapshot.savingsPaceDays >= 7;
+  const dayOutcome = dailyCheck ? calculateDailyCheckOutcome(dailyCheck) : undefined;
+  const dayTotalSpent = dayOutcome?.freeSpent ?? dailyCheck?.freeSpent ?? 0;
+  const dayCashSpent = dayOutcome?.grossOutflow ?? dailyCheck?.grossOutflow ?? 0;
+  const dayCreditSpent = dailyCheck?.creditSpentAmount ?? 0;
+  const dayAccountedOutflow = dailyCheck
+    ? Math.max(0, (dailyCheck.transferToSavingsAmount ?? 0) + (dailyCheck.mandatoryPaidAmount ?? 0))
+    : 0;
+  const dayOverpay = dailyCheck ? Math.max(0, dayTotalSpent - dailyCheck.plannedLimit) : 0;
   const data: Record<TodayInfoTopic, { title: string; description: string; lines: string[] }> = {
     spent: {
       title: "Потрачено в цикле",
@@ -844,7 +941,7 @@ function TodayInfoDialog({
       lines: [
         `Сейчас: ${formatMoney(state.operationalBalance)} ₽`,
         "Быстрый расход своими деньгами уменьшает это число.",
-        "Покупка с кредитки увеличивает долг. Платёж по кредитке уменьшает и остаток, и долг."
+        "Расход в долг увеличивает долговое обязательство. Погашение уменьшает и оперативный остаток, и долг."
       ]
     },
     savings: {
@@ -855,6 +952,22 @@ function TodayInfoDialog({
         `Копилка: ${formatMoney(state.savings.cushion.allocated)} ₽`,
         "Перевод «На цель» увеличивает котёл и сразу закрепляет сумму за выбранной целью."
       ]
+    },
+    day: {
+      title: "Итог дня",
+      description: "Переплата — это сколько потрачено сверх ориентира на день.",
+      lines: dailyCheck
+        ? [
+            `Из кармана по остатку: ${formatMoney(dayCashSpent)} ₽`,
+            dayAccountedOutflow > 0
+              ? `Вне дневного лимита: ${formatMoney(dayAccountedOutflow)} ₽`
+              : "Вне дневного лимита: 0 ₽",
+            dayCreditSpent > 0 ? `В долг: ${formatMoney(dayCreditSpent)} ₽` : "В долг: 0 ₽",
+            `Всего за день: ${formatMoney(dayTotalSpent)} ₽`,
+            `Можно было сегодня: ${formatMoney(dailyCheck.plannedLimit)} ₽`,
+            `Переплата: ${formatMoney(dayOverpay)} ₽`
+          ]
+        : ["День ещё не закрыт."]
     }
   };
   const current = data[topic];
@@ -884,10 +997,12 @@ export function TodayScreen({
   onAction,
   onDailyCheck,
   onQuickExpense,
-  onConfirmPaycheck
+  onConfirmPaycheck,
+  onReserveChange
 }: TodayScreenProps) {
   const date = useMemo(() => dateBits(snapshot.today), [snapshot.today]);
   const [infoTopic, setInfoTopic] = useState<TodayInfoTopic | null>(null);
+  const [reserveDialogOpen, setReserveDialogOpen] = useState(false);
   const dailyCheck = getDailyCheck(state, snapshot.today);
   const dailyStatus = dailyStatusText(dailyCheck);
   const bannerState = snapshot.uiStates.find((s) => s !== "normal");
@@ -936,7 +1051,6 @@ export function TodayScreen({
         availableUntilPaycheck={Math.round(snapshot.availableUntilNextPaycheck)}
         remainingDays={snapshot.remainingDays}
       />
-      <FormulaPanel state={state} snapshot={snapshot} />
       <BalanceStrip
         spent={Math.round(cycleSpent)}
         free={Math.round(snapshot.availableUntilNextPaycheck)}
@@ -946,18 +1060,29 @@ export function TodayScreen({
       <PaceRow snapshot={snapshot} onExplain={setInfoTopic} />
       <TodayCycleAxis snapshot={snapshot} />
       <CheckPanel check={dailyCheck} onDailyCheck={onDailyCheck} />
-      <DaySummary check={dailyCheck} />
+      <DaySummary check={dailyCheck} onExplain={setInfoTopic} />
       <PaymentLine
         payments={snapshot.nextMandatoryPayments}
         nextPaycheckDate={snapshot.nextPaycheckDate}
       />
       <div style={{ flex: 1, minHeight: 10 }} />
-      <FooterSummary state={state} onExplain={setInfoTopic} />
+      <FooterSummary
+        state={state}
+        onExplain={setInfoTopic}
+        onReserveEdit={() => setReserveDialogOpen(true)}
+      />
       <TodayActions onAction={onAction} onQuickExpense={onQuickExpense} />
+      <ReserveEditDialog
+        open={reserveDialogOpen}
+        state={state}
+        onOpenChange={setReserveDialogOpen}
+        onSubmit={onReserveChange}
+      />
       <TodayInfoDialog
         topic={infoTopic}
         state={state}
         snapshot={snapshot}
+        dailyCheck={dailyCheck}
         onOpenChange={(open) => {
           if (!open) setInfoTopic(null);
         }}

@@ -51,10 +51,9 @@ interface CycleScreenProps {
   onUpdateMandatoryPayment: (paymentId: string, payment: Omit<MandatoryPayment, "id" | "status">) => void;
   onDeleteMandatoryPayment: (paymentId: string) => void;
   onSkipMandatoryPaymentOccurrence: (paymentId: string, date: ISODate) => void;
-  onCancelMandatoryPayment: (payment: MandatoryPayment) => void;
+  onCancelMandatoryPayment: (payment: MandatoryPayment, options?: { rollbackDebtPayment?: boolean }) => void;
   onSaveCredit: (credit: Omit<Credit, "id"> & { id?: string }) => void;
   onAddCreditEvent: (event: Omit<CreditEvent, "id">) => void;
-  onDeleteCreditEvent: (eventId: string) => void;
   onToggleCreditClosed: (creditId: string, isClosed: boolean) => void;
   rubrics: Rubric[];
   goals: SavingsGoal[];
@@ -826,7 +825,7 @@ function MandatoryPaymentDialog({
                 </div>
               )}
             </DialogField>
-            <DialogField id="cycle-payment-credit" label="Кредит">
+            <DialogField id="cycle-payment-credit" label="Связь с долгом">
               <select
                 id="cycle-payment-credit"
                 value={linkedCreditId}
@@ -846,7 +845,7 @@ function MandatoryPaymentDialog({
                   fontSize: 11
                 }}
               >
-                <option value="">Без связи с кредитом</option>
+                <option value="">Без связи с долгом</option>
                 {activeCredits.map((credit) => (
                   <option key={credit.id} value={credit.id}>
                     {credit.title} · {formatMoney(calculateCreditBalance(credit, creditEvents))} ₽
@@ -1078,7 +1077,7 @@ function CancelPaymentDialog({
   const paidFromCredit = payment?.paidFrom === "credit";
   const cancelText = payment
     ? paidFromCredit
-      ? `Оперативный остаток не изменится. Долг по карте будет откатан, а платёж станет ${nextStatus}.`
+      ? `Оперативный остаток не изменится. Долг будет откатан, а платёж станет ${nextStatus}.`
       : `Сумма ${formatMoney(payment.amount)} ₽ вернётся в оперативный остаток, а платёж станет ${nextStatus}.`
     : "";
 
@@ -1905,9 +1904,9 @@ function CreditDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{mode === "edit" ? "Изменить кредит" : "Новый кредит"}</DialogTitle>
+          <DialogTitle>{mode === "edit" ? "Изменить долг" : "Новый долг"}</DialogTitle>
           <DialogDescription>
-            Это карточка долга. Покупка по кредитке увеличивает долг, платёж по кредиту уменьшает.
+            Это карточка долгового обязательства. Расход в долг увеличивает остаток долга, погашение уменьшает.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
@@ -1917,7 +1916,7 @@ function CreditDialog({
                 id="cycle-credit-title"
                 value={title}
                 onChange={(event) => setTitle(event.currentTarget.value)}
-                placeholder="Например: кредитная карта"
+                placeholder="Например: карта, займ, рассрочка"
                 autoFocus
                 required
               />
@@ -1941,7 +1940,7 @@ function CreditDialog({
                 required
               />
             </DialogField>
-            <DialogField id="cycle-credit-limit" label="Лимит карты">
+            <DialogField id="cycle-credit-limit" label="Лимит обязательства">
               <Input
                 id="cycle-credit-limit"
                 value={creditLimit}
@@ -1959,7 +1958,7 @@ function CreditDialog({
               />
             </DialogField>
             <div className="mono" style={{ fontSize: 9, lineHeight: 1.45, color: "var(--ink-55)" }}>
-              Если по карте уже есть долг, внесите его здесь. Лимит нужен, чтобы видеть доступный остаток.
+              Если по обязательству уже есть долг, внесите его здесь. Лимит нужен, чтобы видеть доступный остаток.
             </div>
           </DialogBody>
           <button
@@ -1977,7 +1976,7 @@ function CreditDialog({
             }}
           >
             <span className="slab" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              {mode === "edit" ? "Сохранить кредит" : "Добавить кредит"}
+              {mode === "edit" ? "Сохранить долг" : "Добавить долг"}
             </span>
           </button>
         </form>
@@ -2027,7 +2026,7 @@ function InsufficientPaymentDialog({
         <DialogHeader>
           <DialogTitle>Недостаточно денег</DialogTitle>
           <DialogDescription>
-            Платёж не проведён. Оперативный остаток не должен уходить в минус без явного выбора кредитной карты.
+            Платёж не проведён. Оперативный остаток не должен уходить в минус без явного выбора долгового обязательства.
           </DialogDescription>
         </DialogHeader>
         {payment && (
@@ -2037,7 +2036,7 @@ function InsufficientPaymentDialog({
                 Нужно {formatMoney(payment.amount)} ₽, в оперативном остатке {formatMoney(operationalBalance)} ₽.
               </div>
               {activeCredits.length > 0 ? (
-                <DialogField id="cycle-insufficient-credit" label="Списать с кредитной карты">
+                <DialogField id="cycle-insufficient-credit" label="Списать в долг">
                   <select
                     id="cycle-insufficient-credit"
                     value={creditId}
@@ -2062,13 +2061,13 @@ function InsufficientPaymentDialog({
                     ))}
                   </select>
                   <div className="mono" style={{ marginTop: 4, fontSize: 9, lineHeight: 1.45, color: "var(--ink-55)" }}>
-                    Оперативный остаток не изменится. Долг по выбранной карте увеличится на сумму платежа.
+                    Оперативный остаток не изменится. Выбранный долг увеличится на сумму платежа.
                   </div>
                 </DialogField>
               ) : (
                 <div className="mono" style={{ fontSize: 9.5, lineHeight: 1.45, color: "var(--red)" }}>
-                  Доступных кредитных карт нет. Добавьте кредит на вкладке «Цикл» или пополните оперативный остаток.
-                  Если это платёж по кредиту, нельзя списать его с той же карты.
+                  Доступных долговых обязательств нет. Добавьте долг на вкладке «Цикл» или пополните оперативный остаток.
+                  Если это погашение долга, нельзя списать его в то же обязательство.
                 </div>
               )}
             </DialogBody>
@@ -2105,7 +2104,7 @@ function InsufficientPaymentDialog({
                 }}
               >
                 <span className="slab" style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                  Оплатить с карты
+                  Списать в долг
                 </span>
               </button>
             </div>
@@ -2150,9 +2149,9 @@ function CreditPaymentBridgeDialog({
     <Dialog open={Boolean(payment && credit)} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Зачесть в кредит?</DialogTitle>
+          <DialogTitle>Зачесть в долг?</DialogTitle>
           <DialogDescription>
-            Платёж уже отмечен как оплаченный. Можно отдельно уменьшить долг по связанному кредиту.
+            Платёж уже отмечен как оплаченный. Можно отдельно уменьшить связанный долг.
           </DialogDescription>
         </DialogHeader>
         {payment && credit && (
@@ -2261,9 +2260,9 @@ function CreditsSection({
         }}
       >
         <div>
-          <div className="eyebrow eyebrow--ink">Кредиты</div>
+          <div className="eyebrow eyebrow--ink">Долговые обязательства</div>
           <div className="mono" style={{ marginTop: 2, fontSize: 8.5, lineHeight: 1.35, color: "var(--ink-55)" }}>
-            Реестр долгов. Покупки по кредитке увеличивают долг, платежи по кредиту уменьшают.
+            Реестр долгов. Расходы в долг увеличивают обязательство, погашения уменьшают.
           </div>
         </div>
         <button
@@ -2280,7 +2279,7 @@ function CreditsSection({
           }}
         >
           <span className="slab" style={{ fontSize: 8.5, letterSpacing: "0.07em", textTransform: "uppercase" }}>
-            Новый кредит
+            Новый долг
           </span>
         </button>
       </div>
@@ -2306,14 +2305,14 @@ function CreditsSection({
       {activeLimitCards > 0 && (
         <div className="mono" style={{ marginTop: -2, marginBottom: 7, fontSize: 8.8, color: "var(--ink-55)", lineHeight: 1.4 }}>
           Доступный лимит: {formatMoney(activeAvailableLimit)} ₽ из {formatMoney(activeLimit)} ₽
-          {activeLimitCards < active.length ? " · у части карт лимит не задан" : ""}
+          {activeLimitCards < active.length ? " · у части обязательств лимит не задан" : ""}
         </div>
       )}
 
       <div style={{ display: "grid", gap: 6 }}>
         {active.length === 0 && (
           <div className="mono" style={{ fontSize: 9, color: "var(--ink-35)", padding: "4px 0" }}>
-            активных кредитов нет
+            активных долгов нет
           </div>
         )}
         {active.map((credit) => (
@@ -2478,7 +2477,7 @@ function CreditRow({
         </div>
         <div className="mono" style={{ marginTop: 3, fontSize: 8.5, color: "var(--ink-55)", lineHeight: 1.35 }}>
           {limit === undefined
-            ? "лимит карты не задан"
+            ? "лимит обязательства не задан"
             : `доступно ${formatMoney(availableLimit ?? 0)} ₽ из лимита ${formatMoney(limit)} ₽`}
         </div>
         {limit !== undefined && (
@@ -2502,7 +2501,7 @@ function CreditRow({
         )}
         {!credit.isClosed && currentBalance <= 0 && (
           <div className="mono" style={{ marginTop: 3, fontSize: 8.5, color: "var(--red)" }}>
-            Остаток 0. Кредит можно закрыть вручную.
+            Остаток 0. Долг можно закрыть вручную.
           </div>
         )}
         {credit.note && (
@@ -2547,7 +2546,6 @@ export function CycleScreen({
   onCancelMandatoryPayment,
   onSaveCredit,
   onAddCreditEvent,
-  onDeleteCreditEvent,
   onToggleCreditClosed,
   rubrics,
   goals
@@ -2848,10 +2846,7 @@ export function CycleScreen({
           if (!open) setCancelPayment(null);
         }}
         onConfirm={(payment, rollbackCreditEvent) => {
-          onCancelMandatoryPayment(payment);
-          if (rollbackCreditEvent && cancelLinkedCreditEvent) {
-            onDeleteCreditEvent(cancelLinkedCreditEvent.id);
-          }
+          onCancelMandatoryPayment(payment, { rollbackDebtPayment: rollbackCreditEvent });
         }}
       />
       <CreditDialog

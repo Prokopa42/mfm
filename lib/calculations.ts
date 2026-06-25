@@ -50,7 +50,13 @@ export function calculateDailyCheckOutcome(input: {
   status: DailyCheckStatus;
 } {
   if (input.morningBalance === undefined) {
-    return { status: "draft" };
+    return {
+      grossOutflow: undefined,
+      freeSpent: undefined,
+      delta: undefined,
+      calculatedEveningBalance: undefined,
+      status: "draft"
+    };
   }
 
   const incomeAmount = input.incomeAmount ?? 0;
@@ -61,33 +67,51 @@ export function calculateDailyCheckOutcome(input: {
   const creditSpentAmount = input.creditSpentAmount ?? 0;
   const creditPaymentAmount = input.creditPaymentAmount ?? 0;
   const plannedLimit = Math.max(0, input.plannedLimit);
+  const accountedOutflowAmount = transferToSavingsAmount + mandatoryPaidAmount;
+  const cashMovementAmount =
+    incomeAmount +
+    withdrawalFromSavingsAmount +
+    transferToSavingsAmount +
+    mandatoryPaidAmount +
+    quickSpentAmount +
+    creditPaymentAmount;
 
   let grossOutflow: number;
   let freeSpent: number;
   let calculatedEveningBalance: number | undefined;
 
   if (input.eveningBalance !== undefined) {
-    grossOutflow =
+    grossOutflow = Math.max(0,
       input.morningBalance +
       incomeAmount +
       withdrawalFromSavingsAmount -
-      input.eveningBalance -
-      transferToSavingsAmount;
-    const creditFactAddon = input.eveningBalance < 0 ? 0 : creditSpentAmount;
-    freeSpent = grossOutflow - mandatoryPaidAmount + creditFactAddon;
-  } else if (quickSpentAmount > 0 || creditSpentAmount > 0 || creditPaymentAmount > 0) {
-    calculatedEveningBalance =
-      input.morningBalance +
-      incomeAmount +
-      withdrawalFromSavingsAmount -
-      transferToSavingsAmount -
-      mandatoryPaidAmount -
-      quickSpentAmount -
-      creditPaymentAmount;
-    grossOutflow = mandatoryPaidAmount + quickSpentAmount + creditSpentAmount + creditPaymentAmount;
-    freeSpent = quickSpentAmount + creditSpentAmount + creditPaymentAmount;
+      input.eveningBalance
+    );
+    const creditFactAddon =
+      input.eveningBalance < 0
+        ? Math.max(0, creditSpentAmount - Math.abs(input.eveningBalance))
+        : creditSpentAmount;
+    freeSpent = Math.max(0, grossOutflow - accountedOutflowAmount) + creditFactAddon;
+  } else if (cashMovementAmount > 0 || creditSpentAmount > 0) {
+    calculatedEveningBalance = cashMovementAmount > 0
+      ? input.morningBalance +
+        incomeAmount +
+        withdrawalFromSavingsAmount -
+        transferToSavingsAmount -
+        mandatoryPaidAmount -
+        quickSpentAmount -
+        creditPaymentAmount
+      : undefined;
+    grossOutflow = transferToSavingsAmount + mandatoryPaidAmount + quickSpentAmount + creditPaymentAmount;
+    freeSpent = quickSpentAmount + creditPaymentAmount + creditSpentAmount;
   } else {
-    return { status: "draft" };
+    return {
+      grossOutflow: undefined,
+      freeSpent: undefined,
+      delta: undefined,
+      calculatedEveningBalance: undefined,
+      status: "draft"
+    };
   }
 
   const delta = plannedLimit - freeSpent;
@@ -409,7 +433,7 @@ export function buildHistory(state: FinanceState): HistoryItem[] {
       legacyCategory: expense.category,
       detail: joinDetails(
         expense.paymentSource === "credit"
-          ? `Кредит · ${creditTitleById.get(expense.linkedCreditId ?? "") ?? "кредит"}`
+          ? `Долг · ${creditTitleById.get(expense.linkedCreditId ?? "") ?? "долг"}`
           : undefined,
         expense.note
       )
@@ -441,7 +465,7 @@ export function buildHistory(state: FinanceState): HistoryItem[] {
         kind: "mandatory-payment" as const,
         title: payment.title,
         amount: -payment.amount,
-        date: payment.dueDate,
+        date: payment.paidDate ?? payment.dueDate,
         categoryId: payment.categoryId,
         detail: "Обязательный платёж"
       }))
@@ -483,8 +507,8 @@ export function stateText(state: InterfaceState, nextMandatoryPayment?: Mandator
     "cash-risk": "После платежей и подушки денег не хватает. Нужна реакция.",
     "payday-arrived": "Сегодня ожидается выплата. Подтвердите и запустите новый цикл.",
     "payment-due-tomorrow": nextMandatoryPayment
-      ? `${nextMandatoryPayment.title}: сумма уже учтена в лимите, оплату отметьте отдельно.`
-      : "Завтра обязательный платёж: он уже вычтен из лимита.",
+      ? `${nextMandatoryPayment.title}: сумма уже учтена в деньгах до зарплаты, оплату отметьте отдельно.`
+      : "Завтра обязательный платёж: он уже вычтен из денег до зарплаты.",
     "savings-off-track": "Темп накоплений не выводит на цель к дедлайну."
   };
 

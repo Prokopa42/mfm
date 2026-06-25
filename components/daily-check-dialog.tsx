@@ -18,7 +18,8 @@ export type DailyCheckDialogMode = "morning-check" | "evening-check";
 
 export interface DailyCheckPayload {
   date: ISODate;
-  balance: number;
+  balance?: number;
+  clear?: boolean;
   creditId?: string;
   creditSpentAmount?: number;
   reason?: DailyCheckReason;
@@ -31,6 +32,7 @@ interface DailyCheckDialogProps {
   date: ISODate;
   check?: DailyCheck;
   plannedLimit: number;
+  previousEveningBalance?: number;
   credits: Credit[];
   creditEvents: CreditEvent[];
   onOpenChange: (open: boolean) => void;
@@ -50,7 +52,9 @@ const REASON_OPTIONS: Array<{ value: DailyCheckReason; label: string }> = [
 ];
 
 function parseAmount(value: string) {
-  const parsed = Number(value.replace(/\s/g, "").replace(",", "."));
+  const normalized = value.trim().replace(/\s/g, "").replace(",", ".");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -76,6 +80,7 @@ export function DailyCheckDialog({
   date,
   check,
   plannedLimit,
+  previousEveningBalance,
   credits,
   creditEvents,
   onOpenChange,
@@ -108,15 +113,29 @@ export function DailyCheckDialog({
   const title = isMorning ? "Утренний остаток" : "Вечерний остаток";
   const description = isMorning
     ? "Зафиксируйте, сколько денег реально доступно утром. Это станет оперативным остатком."
-    : "Зафиксируйте вечерний остаток. МФМ посчитает факт дня и отклонение от плана.";
+    : "Зафиксируйте вечерний остаток. МФМ посчитает, сколько потрачено и есть ли перерасход.";
   const parsedBalance = parseAmount(balance);
   const activeCredits = credits.filter((credit) => !credit.isClosed);
   const needsCredit = !isMorning && parsedBalance !== null && parsedBalance < 0;
+  const hasFixedBalance = isMorning
+    ? check?.morningBalance !== undefined
+    : check?.eveningBalance !== undefined;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const amount = parseAmount(balance);
-    if (amount === null || !mode) return;
+    if (!mode) return;
+    if (amount === null) {
+      if (hasFixedBalance) {
+        onSubmit(mode, {
+          date: formDate,
+          clear: true
+        });
+      } else {
+        setError("Введите остаток или закройте окно без сохранения.");
+      }
+      return;
+    }
     if (isMorning && amount < 0) {
       setError("Утренний оперативный остаток не может быть меньше нуля.");
       return;
@@ -154,6 +173,56 @@ export function DailyCheckDialog({
                 inputMode="decimal"
                 placeholder="Например, 42300"
               />
+              {isMorning && previousEveningBalance !== undefined && check?.morningBalance === undefined && (
+                <button
+                  type="button"
+                  className="tap-highlight"
+                  onClick={() => {
+                    setBalance(String(Math.max(0, previousEveningBalance)));
+                    setError(null);
+                  }}
+                  style={{
+                    marginTop: 6,
+                    width: "100%",
+                    minHeight: 30,
+                    border: "0.5px solid var(--ink-55)",
+                    background: "transparent",
+                    color: "var(--ink)",
+                    cursor: "pointer",
+                    fontFamily: "inherit"
+                  }}
+                >
+                  <span className="slab" style={{ fontSize: 8.5, letterSpacing: 0, textTransform: "uppercase" }}>
+                    Взять вчерашний вечер: {formatMoney(Math.max(0, previousEveningBalance))} ₽
+                  </span>
+                </button>
+              )}
+              {hasFixedBalance && (
+                <button
+                  type="button"
+                  className="tap-highlight"
+                  onClick={() => {
+                    onSubmit(mode, {
+                      date: formDate,
+                      clear: true
+                    });
+                  }}
+                  style={{
+                    marginTop: 6,
+                    width: "100%",
+                    minHeight: 30,
+                    border: "0.5px solid var(--ink-55)",
+                    background: "transparent",
+                    color: "var(--ink)",
+                    cursor: "pointer",
+                    fontFamily: "inherit"
+                  }}
+                >
+                  <span className="slab" style={{ fontSize: 8.5, letterSpacing: 0, textTransform: "uppercase" }}>
+                    {isMorning ? "Снять фиксацию утра" : "Снять фиксацию вечера"}
+                  </span>
+                </button>
+              )}
             </Field>
             {!isMorning && (
               <Field label="Причина отклонения">
@@ -181,7 +250,7 @@ export function DailyCheckDialog({
               </Field>
             )}
             {needsCredit && (
-              <Field label="Кредитная карта">
+              <Field label="Долговое обязательство">
                 {activeCredits.length > 0 ? (
                   <select
                     value={creditId}
@@ -199,7 +268,7 @@ export function DailyCheckDialog({
                       fontSize: 10
                     }}
                   >
-                    <option value="">Выберите карту</option>
+                    <option value="">Выберите долг</option>
                     {activeCredits.map((credit) => (
                       <option key={credit.id} value={credit.id}>
                         {credit.title} · долг {formatMoney(creditBalance(credit, creditEvents))} ₽
@@ -208,12 +277,12 @@ export function DailyCheckDialog({
                   </select>
                 ) : (
                   <div className="mono" style={{ fontSize: 9, color: "var(--red)", lineHeight: 1.45 }}>
-                    Нет активных кредитных карт. Сначала добавьте кредит на вкладке «Цикл».
+                    Нет активных долговых обязательств. Сначала добавьте долг на вкладке «Цикл».
                   </div>
                 )}
                 <div className="mono" style={{ marginTop: 4, fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
                   Отрицательный вечерний остаток будет сохранён как факт дня. Оперативный остаток станет 0, а долг по
-                  выбранной карте увеличится на {formatMoney(Math.abs(parsedBalance ?? 0))} ₽.
+                  выбранному обязательству увеличится на {formatMoney(Math.abs(parsedBalance ?? 0))} ₽.
                 </div>
               </Field>
             )}
@@ -226,7 +295,7 @@ export function DailyCheckDialog({
               </div>
             )}
             <div className="mono" style={{ fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
-              План дня: {formatMoney(Math.round(check?.plannedLimit ?? plannedLimit))} ₽. Обязательные платежи не
+              Лимит дня: {formatMoney(Math.round(check?.plannedLimit ?? plannedLimit))} ₽. Обязательные платежи не
               наказывают дневной лимит, если они уже учтены в цикле.
             </div>
           </DialogBody>

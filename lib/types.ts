@@ -86,6 +86,7 @@ export interface MandatoryPayment {
   recurrence: MandatoryPaymentRecurrence;
   status: MandatoryPaymentStatus;
   paidFrom?: ExpensePaymentSource;
+  paidDate?: ISODate;
   paidCreditId?: string;
   recurrenceEndDate?: ISODate;
   recurrenceExceptions?: ISODate[];
@@ -221,6 +222,7 @@ export interface TransferToSavings {
   date: ISODate;
   planned: boolean;
   linkedGoalId?: string;
+  linkedSavingsBucket?: "cushion";
   linkedMandatoryPaymentId?: string;
   categoryId?: string;
   title?: string;

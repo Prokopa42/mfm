@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ActionDialogKind } from "@/components/action-dialogs";
 import { Glyph, InlineNumber } from "@/components/mfm-ui";
-import { buildHistory } from "@/lib/calculations";
+import { buildHistory, calculateDailyCheckOutcome } from "@/lib/calculations";
 import { addDays, compareDates, isAfterOrSame, isBeforeOrSame, parseISODate } from "@/lib/dates";
 import type {
   CalculationSnapshot,
@@ -135,6 +135,7 @@ function matchesFilterDate(date: ISODate, filter: DiaryFilter, snapshot: Calcula
 
 function buildOperations(state: FinanceState, filter: DiaryFilter, snapshot: CalculationSnapshot): OperationItem[] {
   const creditTitleById = new Map(state.credits.map((credit) => [credit.id, credit.title]));
+  const expenseById = new Map(state.variableExpenses.map((expense) => [expense.id, expense]));
   const mandatoryById = new Map(state.mandatoryPayments.map((payment) => [payment.id, payment]));
   const linkedCreditPaymentByMandatoryId = new Map(
     state.creditEvents
@@ -150,12 +151,13 @@ function buildOperations(state: FinanceState, filter: DiaryFilter, snapshot: Cal
     .filter((item) => !(item.kind === "transfer-to-savings" && linkedMandatoryTransferIds.has(item.id)))
     .map((item) => {
       const mandatoryPayment = item.kind === "mandatory-payment" ? mandatoryById.get(item.id) : undefined;
+      const expense = item.kind === "expense" ? expenseById.get(item.id) : undefined;
       const linkedCreditEvent = mandatoryPayment ? linkedCreditPaymentByMandatoryId.get(mandatoryPayment.id) : undefined;
       const linkedCreditTitle = mandatoryPayment?.linkedCreditId
         ? creditTitleById.get(mandatoryPayment.linkedCreditId)
         : undefined;
       const detail = mandatoryPayment?.linkedCreditId
-        ? ["платёж карты", linkedCreditTitle].filter(Boolean).join(" · ")
+        ? ["погашение долга", linkedCreditTitle].filter(Boolean).join(" · ")
         : item.detail;
       return {
         id: item.id,
@@ -166,7 +168,9 @@ function buildOperations(state: FinanceState, filter: DiaryFilter, snapshot: Cal
         detail,
         amount: item.amount,
         cashEffect: mandatoryPayment?.paidFrom === "credit" ? 0 : item.cashEffect ?? item.amount,
-        debtEffect: mandatoryPayment?.linkedCreditId
+        debtEffect: expense?.paymentSource === "credit"
+          ? expense.amount
+          : mandatoryPayment?.linkedCreditId
           ? -(linkedCreditEvent?.amount ?? mandatoryPayment.amount)
           : undefined
       };
@@ -189,8 +193,8 @@ function buildOperations(state: FinanceState, filter: DiaryFilter, snapshot: Cal
         createdAt: entry.createdAt,
         title:
           entry.note ||
-          (isCreditPayment ? "Платёж по карте" : isCreditExpense ? "Расход с кредитки" : "Быстрый расход"),
-        detail: isCreditPayment ? "Платёж по карте" : isCreditExpense ? "Кредитные деньги" : "Свои деньги",
+          (isCreditPayment ? "Погашение долга" : isCreditExpense ? "Расход в долг" : "Быстрый расход"),
+        detail: isCreditPayment ? "Погашение долга" : isCreditExpense ? "Заёмные деньги" : "Свои деньги",
         amount: -entry.amount,
         cashEffect: isCreditExpense ? 0 : -entry.amount,
         debtEffect: isCreditPayment ? -entry.amount : isCreditExpense ? entry.amount : 0
@@ -341,9 +345,9 @@ function operationKindLabel(kind: OperationKind) {
     case "mandatory-payment":
       return "обязательный платёж";
     case "quick-credit-expense":
-      return "кредитка";
+      return "в долг";
     case "quick-credit-payment":
-      return "платёж карты";
+      return "погашение долга";
     case "quick-expense":
       return "быстрый расход";
     default:
@@ -497,8 +501,10 @@ function OperationRow({
 }
 
 function DiaryRow({ check }: { check: DailyCheck }) {
-  const delta = check.delta ?? 0;
-  const deltaColor = delta >= 0 ? "var(--blue)" : "var(--red)";
+  const outcome = calculateDailyCheckOutcome(check);
+  const totalSpent = outcome.freeSpent ?? check.freeSpent ?? 0;
+  const overpay = Math.max(0, totalSpent - check.plannedLimit);
+  const creditSpentAmount = check.creditSpentAmount ?? 0;
   const hasCalculatedEvening =
     check.eveningBalance === undefined && check.calculatedEveningBalance !== undefined;
   return (
@@ -522,19 +528,23 @@ function DiaryRow({ check }: { check: DailyCheck }) {
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 10 }}>
-        <Metric label="План" value={check.plannedLimit} />
-        <Metric label="Факт" value={check.freeSpent} />
-        <Metric label="Отклонение" value={delta} color={deltaColor} signed />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+        <Metric label="Всего за день" value={totalSpent} />
+        <Metric label="Переплата" value={overpay} color={overpay > 0 ? "var(--red)" : "var(--ink)"} />
+      </div>
+
+      <div className="mono" style={{ marginTop: 8, fontSize: 9, color: "var(--ink-55)", lineHeight: 1.45 }}>
+        Ориентир дня: {formatMoney(check.plannedLimit)} ₽.
+        {creditSpentAmount > 0 ? ` В долг: ${formatMoney(creditSpentAmount)} ₽.` : ""}
       </div>
 
       {((check.quickSpentAmount ?? 0) > 0 || (check.creditSpentAmount ?? 0) > 0 || (check.creditPaymentAmount ?? 0) > 0) && (
         <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: "var(--ink-55)", lineHeight: 1.45 }}>
           Быстрые операции: свои расходы {formatMoney(check.quickSpentAmount ?? 0)} ₽
-          {(check.creditSpentAmount ?? 0) > 0 ? ` · кредитка ${formatMoney(check.creditSpentAmount ?? 0)} ₽` : ""}
-          {(check.creditPaymentAmount ?? 0) > 0 ? ` · платёж по карте ${formatMoney(check.creditPaymentAmount ?? 0)} ₽` : ""}
+          {creditSpentAmount > 0 ? ` · в долг ${formatMoney(creditSpentAmount)} ₽` : ""}
+          {(check.creditPaymentAmount ?? 0) > 0 ? ` · погашение долга ${formatMoney(check.creditPaymentAmount ?? 0)} ₽` : ""}
           {check.quickSpentEntries && check.quickSpentEntries.length > 0
-            ? ` · ${check.quickSpentEntries.map((entry) => `${formatMoney(entry.amount)} ₽${entry.operation === "credit-payment" ? " платёж по карте" : entry.paymentSource === "credit" ? " кредитка" : ""}${entry.note ? ` — ${entry.note}` : ""}`).join(" · ")}`
+            ? ` · ${check.quickSpentEntries.map((entry) => `${formatMoney(entry.amount)} ₽${entry.operation === "credit-payment" ? " погашение долга" : entry.paymentSource === "credit" ? " в долг" : ""}${entry.note ? ` — ${entry.note}` : ""}`).join(" · ")}`
             : ""}
         </div>
       )}
@@ -657,7 +667,7 @@ export function HistoryScreen({
               Дневник пока пуст
             </div>
             <div className="mono" style={{ marginTop: 6, fontSize: 10, color: "var(--ink-55)", lineHeight: 1.45 }}>
-              После утреннего и вечернего остатка здесь появится факт дня: план, фактический расход и отклонение.
+              После утреннего и вечернего остатка здесь появится итог дня: всего за день и переплата.
             </div>
           </div>
         ) : (

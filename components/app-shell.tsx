@@ -140,6 +140,16 @@ function creditEventEffect(event: CreditEvent) {
   return event.amount;
 }
 
+function quickCreditSpentAmount(check?: DailyCheck) {
+  return (check?.quickSpentEntries ?? [])
+    .filter((entry) => entry.operation !== "credit-payment" && entry.paymentSource === "credit")
+    .reduce((sum, entry) => sum + entry.amount, 0);
+}
+
+function keepNonEveningCreditEvent(event: CreditEvent, dailyCheckId: string) {
+  return event.linkedDailyCheckId !== dailyCheckId || Boolean(event.linkedQuickSpentEntryId);
+}
+
 function calculateCreditCurrentBalance(credit: Credit, events: CreditEvent[]) {
   return Math.max(
     0,
@@ -165,7 +175,7 @@ function dailyAmountsForDate(state: FinanceState, date: string) {
       .filter(
         (payment) =>
           payment.status === "paid" &&
-          payment.dueDate === date &&
+          (payment.paidDate ?? payment.dueDate) === date &&
           payment.paidFrom !== "credit" &&
           !payment.linkedGoalId
       )
@@ -213,6 +223,10 @@ export function AppShell() {
   const [activeDailyCheckDialog, setActiveDailyCheckDialog] = useState<DailyCheckDialogMode | null>(null);
   const [quickExpenseOpen, setQuickExpenseOpen] = useState(false);
   const snapshot = useMemo(() => calculateSnapshot(financeState), [financeState]);
+  const todayCheck = financeState.dailyChecks.find((check) => check.date === snapshot.today);
+  const previousDayCheck = financeState.dailyChecks.find((check) => check.date === addDays(snapshot.today, -1));
+  const previousEveningBalance =
+    previousDayCheck?.eveningBalance ?? previousDayCheck?.calculatedEveningBalance;
 
   useEffect(() => {
     if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {
@@ -266,7 +280,7 @@ export function AppShell() {
                 date: payload.date,
                 kind: "charge" as const,
                 amount: payload.amount,
-                note: `Кредитный расход: ${title}`,
+                note: `Расход в долг: ${title}`,
                 linkedExpenseId: expenseId
               },
               ...previous.creditEvents
@@ -306,9 +320,11 @@ export function AppShell() {
         ? previous.goals.find((goal) => goal.id === payload.linkedGoalId)
         : undefined;
       const linkedGoal = !payload.planned ? linkedGoalForTitle : undefined;
+      const linkedCushion = !payload.planned && payload.linkedSavingsBucket === "cushion";
       const transferTitle =
         payload.title ||
         (linkedGoalForTitle ? `На цель: ${linkedGoalForTitle.title}` : undefined) ||
+        (payload.linkedSavingsBucket === "cushion" ? "В копилку" : undefined) ||
         "В накопления";
       const nextState = {
         ...previous,
@@ -319,7 +335,13 @@ export function AppShell() {
           ? previous.savings
           : {
               ...previous.savings,
-              balance: previous.savings.balance + payload.amount
+              balance: previous.savings.balance + payload.amount,
+              cushion: linkedCushion
+                ? {
+                    ...previous.savings.cushion,
+                    allocated: previous.savings.cushion.allocated + payload.amount
+                  }
+                : previous.savings.cushion
             },
         goals: linkedGoal
           ? previous.goals.map((goal) =>
@@ -338,6 +360,7 @@ export function AppShell() {
             date: payload.date,
             planned: Boolean(payload.planned),
             linkedGoalId: payload.linkedGoalId,
+            linkedSavingsBucket: payload.linkedSavingsBucket,
             categoryId: payload.categoryId,
             title: transferTitle,
             note: payload.note
@@ -414,11 +437,22 @@ export function AppShell() {
     });
   }
 
+  function handleReserveChange(amount: number) {
+    updateState((previous) => ({
+      ...previous,
+      settings: {
+        ...previous.settings,
+        reserveAmount: Math.max(0, amount)
+      }
+    }));
+  }
+
   function handleMarkPaymentPaid(
     payment: MandatoryPayment,
     options: { paymentSource?: ExpensePaymentSource; creditId?: string } = {}
   ) {
     updateState((previous) => {
+      const paidDate = todayISO();
       const payFromCredit = options.paymentSource === "credit" && Boolean(options.creditId);
       const credit = payFromCredit
         ? previous.credits.find((item) => item.id === options.creditId && !item.isClosed)
@@ -453,7 +487,7 @@ export function AppShell() {
               {
                 id: uid("credit_event"),
                 creditId: credit!.id,
-                date: payment.dueDate,
+                date: paidDate,
                 kind: "charge" as const,
                 amount: payment.amount,
                 note: `Оплата обязательного платежа: ${payment.title}`,
@@ -466,7 +500,7 @@ export function AppShell() {
               {
                 id: uid("credit_event"),
                 creditId: linkedPaymentCredit!.id,
-                date: payment.dueDate,
+                date: paidDate,
                 kind: "payment" as const,
                 amount: linkedCreditPaymentAmount,
                 note: `Погашение долга обязательным платежом: ${payment.title}`,
@@ -503,7 +537,7 @@ export function AppShell() {
               {
                 id: uid("transfer"),
                 amount: payment.amount,
-                date: payment.dueDate,
+                date: paidDate,
                 planned: false,
                 linkedGoalId: linkedGoal!.id,
                 linkedMandatoryPaymentId: payment.id,
@@ -520,13 +554,14 @@ export function AppShell() {
                 ...item,
                 status: "paid" as const,
                 paidFrom: payFromCredit ? "credit" as const : "own" as const,
+                paidDate,
                 paidCreditId: payFromCredit ? credit!.id : undefined
               }
             : item
         ),
         creditEvents
       };
-      return upsertDailyCheck(nextState, payment.dueDate, {}, false);
+      return upsertDailyCheck(nextState, paidDate, {}, false);
     });
   }
 
@@ -591,13 +626,18 @@ export function AppShell() {
     }));
   }
 
-  function handleCancelMandatoryPayment(payment: MandatoryPayment) {
+  function handleCancelMandatoryPayment(
+    payment: MandatoryPayment,
+    options: { rollbackDebtPayment?: boolean } = {}
+  ) {
     const today = todayISO();
     updateState((previous) => {
       const target = previous.mandatoryPayments.find((item) => item.id === payment.id && item.status === "paid");
       if (!target) return previous;
+      const rollbackDebtPayment = options.rollbackDebtPayment ?? true;
       const unpaidStatus: MandatoryPayment["status"] =
         compareDates(target.dueDate, today) < 0 ? "missed" : "scheduled";
+      const paidDate = target.paidDate ?? target.dueDate;
       const linkedGoalTransfers = previous.transfersToSavings.filter(
         (transfer) => transfer.linkedMandatoryPaymentId === target.id
       );
@@ -627,38 +667,75 @@ export function AppShell() {
         transfersToSavings: linkedGoalTransferAmount > 0
           ? previous.transfersToSavings.filter((transfer) => transfer.linkedMandatoryPaymentId !== target.id)
           : previous.transfersToSavings,
-        creditEvents: target.paidFrom === "credit"
-          ? previous.creditEvents.filter(
-              (event) => !(event.kind === "charge" && event.linkedMandatoryPaymentId === target.id)
-            )
-          : previous.creditEvents,
+        creditEvents: previous.creditEvents.filter((event) => {
+          if (event.linkedMandatoryPaymentId !== target.id) return true;
+          if (event.kind === "charge" && target.paidFrom === "credit") return false;
+          if (event.kind === "payment" && rollbackDebtPayment) return false;
+          return true;
+        }),
         mandatoryPayments: previous.mandatoryPayments.map((item) =>
           item.id === target.id
             ? {
                 ...item,
                 status: unpaidStatus,
                 paidFrom: undefined,
+                paidDate: undefined,
                 paidCreditId: undefined
               }
             : item
         )
       };
-      return upsertDailyCheck(nextState, target.dueDate, {}, false);
+      return upsertDailyCheck(nextState, paidDate, {}, false);
     });
   }
 
   function handleSaveDailyCheck(mode: DailyCheckDialogMode, payload: DailyCheckPayload) {
     const savedAt = new Date().toISOString();
-    if (mode === "morning-check" && payload.balance < 0) return;
+    if (!payload.clear && payload.balance === undefined) return;
+    if (mode === "morning-check" && payload.balance !== undefined && payload.balance < 0) return;
 
     updateState((previous) => {
       const existing = previous.dailyChecks.find((check) => check.date === payload.date);
+      if (payload.clear && !existing) return previous;
       const dailyCheckId = existing?.id ?? uid("daily_check");
+      const quickCreditAmount = quickCreditSpentAmount(existing);
+      if (payload.clear) {
+        const nextState = {
+          ...previous,
+          creditEvents:
+            mode === "evening-check"
+              ? previous.creditEvents.filter((event) => keepNonEveningCreditEvent(event, dailyCheckId))
+              : previous.creditEvents
+        };
+        return upsertDailyCheck(
+          nextState,
+          payload.date,
+          mode === "morning-check"
+            ? {
+                morningBalance: undefined,
+                morningAt: undefined
+              }
+            : {
+                eveningBalance: undefined,
+                eveningAt: undefined,
+                calculatedEveningBalance: undefined,
+                creditSpentAmount: quickCreditAmount || undefined,
+                creditId: undefined,
+                reason: undefined,
+                note: undefined
+              },
+          true,
+          dailyCheckId
+        );
+      }
+
+      const balance = payload.balance;
+      if (balance === undefined) return previous;
       const isCreditEvening =
         mode === "evening-check" &&
-        payload.balance < 0 &&
+        balance < 0 &&
         Boolean(payload.creditId);
-      if (mode === "evening-check" && payload.balance < 0 && !payload.creditId) return previous;
+      if (mode === "evening-check" && balance < 0 && !payload.creditId) return previous;
       if (
         isCreditEvening &&
         !previous.credits.some((credit) => credit.id === payload.creditId && !credit.isClosed)
@@ -666,16 +743,16 @@ export function AppShell() {
         return previous;
       }
       const creditSpentAmount = isCreditEvening
-        ? Math.abs(payload.balance)
+        ? quickCreditAmount + Math.abs(balance)
         : mode === "evening-check"
-          ? undefined
+          ? quickCreditAmount || undefined
           : existing?.creditSpentAmount;
       const nextState = {
         ...previous,
-        operationalBalance: isCreditEvening ? 0 : payload.balance,
+        operationalBalance: isCreditEvening ? 0 : balance,
         creditEvents: [
           ...(mode === "evening-check"
-            ? previous.creditEvents.filter((event) => event.linkedDailyCheckId !== dailyCheckId)
+            ? previous.creditEvents.filter((event) => keepNonEveningCreditEvent(event, dailyCheckId))
             : previous.creditEvents),
           ...(isCreditEvening
             ? [
@@ -684,8 +761,8 @@ export function AppShell() {
                   creditId: payload.creditId!,
                   date: payload.date,
                   kind: "charge" as const,
-                  amount: Math.abs(payload.balance),
-                  note: "Вечерний минус закрыт кредитной картой",
+                  amount: Math.abs(balance),
+                  note: "Вечерний минус закрыт в долг",
                   linkedDailyCheckId: dailyCheckId
                 }
               ]
@@ -701,9 +778,9 @@ export function AppShell() {
         nextState,
         payload.date,
         {
-          morningBalance: mode === "morning-check" ? payload.balance : existing?.morningBalance,
+          morningBalance: mode === "morning-check" ? balance : existing?.morningBalance,
           morningAt: mode === "morning-check" ? savedAt : existing?.morningAt,
-          eveningBalance: mode === "evening-check" ? payload.balance : existing?.eveningBalance,
+          eveningBalance: mode === "evening-check" ? balance : existing?.eveningBalance,
           eveningAt: mode === "evening-check" ? savedAt : existing?.eveningAt,
           creditSpentAmount,
           creditId: isCreditEvening ? payload.creditId : mode === "evening-check" ? undefined : existing?.creditId,
@@ -768,11 +845,11 @@ export function AppShell() {
                 amount: payload.amount,
                 note: isCreditPayment
                   ? payload.note
-                    ? `Платёж по кредиту: ${payload.note}`
-                    : "Платёж по кредитной карте"
+                    ? `Погашение долга: ${payload.note}`
+                    : "Погашение долга"
                   : payload.note
                     ? `Быстрый расход: ${payload.note}`
-                    : "Быстрый расход с кредитной карты",
+                    : "Быстрый расход в долг",
                 linkedDailyCheckId: dailyCheckId,
                 linkedQuickSpentEntryId: entryId
               },
@@ -861,13 +938,6 @@ export function AppShell() {
     });
   }
 
-  function handleDeleteCreditEvent(eventId: string) {
-    updateState((previous) => ({
-      ...previous,
-      creditEvents: previous.creditEvents.filter((event) => event.id !== eventId)
-    }));
-  }
-
   function handleDeleteHistoryItem(kind: HistoryItemKind, id: string) {
     updateState((previous) => {
       if (kind === "income") {
@@ -886,7 +956,7 @@ export function AppShell() {
         const expense = previous.variableExpenses.find((item) => item.id === id);
         if (!expense) return previous;
         const paidByCredit = expense.paymentSource === "credit";
-        return {
+        const nextState = {
           ...previous,
           operationalBalance: paidByCredit
             ? previous.operationalBalance
@@ -896,6 +966,7 @@ export function AppShell() {
             ? previous.creditEvents.filter((event) => event.linkedExpenseId !== id)
             : previous.creditEvents
         };
+        return upsertDailyCheck(nextState, expense.date, {}, false);
       }
 
       if (kind === "transfer-to-savings") {
@@ -910,7 +981,13 @@ export function AppShell() {
             ? previous.savings
             : {
                 ...previous.savings,
-                balance: Math.max(0, previous.savings.balance - transfer.amount)
+                balance: Math.max(0, previous.savings.balance - transfer.amount),
+                cushion: transfer.linkedSavingsBucket === "cushion"
+                  ? {
+                      ...previous.savings.cushion,
+                      allocated: Math.max(0, previous.savings.cushion.allocated - transfer.amount)
+                    }
+                  : previous.savings.cushion
               },
           goals: !transfer.planned && transfer.linkedGoalId
             ? previous.goals.map((goal) =>
@@ -945,6 +1022,7 @@ export function AppShell() {
         if (!target) return previous;
         const unpaidStatus: MandatoryPayment["status"] =
           compareDates(target.dueDate, today) < 0 ? "missed" : "scheduled";
+        const paidDate = target.paidDate ?? target.dueDate;
         const linkedGoalTransfers = previous.transfersToSavings.filter(
           (transfer) => transfer.linkedMandatoryPaymentId === target.id
         );
@@ -977,12 +1055,13 @@ export function AppShell() {
                   ...item,
                   status: unpaidStatus,
                   paidFrom: undefined,
+                  paidDate: undefined,
                   paidCreditId: undefined
                 }
               : item
           )
         };
-        return upsertDailyCheck(nextState, target.dueDate, {}, false);
+        return upsertDailyCheck(nextState, paidDate, {}, false);
       }
 
       return previous;
@@ -1252,6 +1331,7 @@ export function AppShell() {
         onDailyCheck={setActiveDailyCheckDialog}
         onQuickExpense={() => setQuickExpenseOpen(true)}
         onConfirmPaycheck={handleConfirmPaycheck}
+        onReserveChange={handleReserveChange}
       />
     ),
     cycle: (
@@ -1267,7 +1347,6 @@ export function AppShell() {
         onCancelMandatoryPayment={handleCancelMandatoryPayment}
         onSaveCredit={handleSaveCredit}
         onAddCreditEvent={handleAddCreditEvent}
-        onDeleteCreditEvent={handleDeleteCreditEvent}
         onToggleCreditClosed={handleToggleCreditClosed}
         rubrics={financeState.rubrics}
         goals={financeState.goals}
@@ -1346,8 +1425,9 @@ export function AppShell() {
         open={activeDailyCheckDialog !== null}
         mode={activeDailyCheckDialog}
         date={snapshot.today}
-        check={financeState.dailyChecks.find((check) => check.date === snapshot.today)}
+        check={todayCheck}
         plannedLimit={Math.round(snapshot.safeToSpendToday)}
+        previousEveningBalance={previousEveningBalance}
         credits={financeState.credits}
         creditEvents={financeState.creditEvents}
         onOpenChange={(open) => {
@@ -1358,7 +1438,7 @@ export function AppShell() {
       <QuickExpenseDialog
         open={quickExpenseOpen}
         date={snapshot.today}
-        check={financeState.dailyChecks.find((check) => check.date === snapshot.today)}
+        check={todayCheck}
         credits={financeState.credits}
         creditEvents={financeState.creditEvents}
         availableOperational={financeState.operationalBalance}
