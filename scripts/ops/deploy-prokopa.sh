@@ -33,7 +33,7 @@ git archive --format=tar HEAD | ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeou
   "set -eu; tar -xf - -C '$REMOTE_DIR'"
 
 ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$REMOTE" \
-  "set -eu; cd '$REMOTE_DIR' && npm install && npm run build && if pm2 describe mfm-prokopa >/dev/null 2>&1; then pm2 restart mfm-prokopa --update-env; else pm2 start node_modules/next/dist/bin/next --name mfm-prokopa -- start -H 127.0.0.1 -p '$APP_PORT'; fi && pm2 save && curl -I --max-time 10 http://127.0.0.1:$APP_PORT/"
+  "set -eu; cd '$REMOTE_DIR' && npm install && npm run build && if pm2 describe mfm-prokopa >/dev/null 2>&1; then pm2 restart mfm-prokopa --update-env; else pm2 start node_modules/next/dist/bin/next --name mfm-prokopa -- start -H 127.0.0.1 -p '$APP_PORT'; fi && pm2 save && for attempt in 1 2 3 4 5 6 7 8 9 10; do if curl -fsSI --max-time 3 http://127.0.0.1:$APP_PORT/; then exit 0; fi; sleep 1; done; curl -I --max-time 10 http://127.0.0.1:$APP_PORT/"
 
 echo "ProKopa deploy done. Public check:"
 echo "  curl -I https://mfm.prokopa.ru/"
