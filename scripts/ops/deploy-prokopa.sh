@@ -12,20 +12,25 @@ echo "port:   $PORT"
 echo "dir:    $REMOTE_DIR"
 echo "app:    127.0.0.1:$APP_PORT"
 
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "ERROR: run from the MFM git repository." >&2
+  exit 1
+fi
+
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "ERROR: tracked files have uncommitted changes. Commit them before deploy." >&2
+  git status --short
+  exit 1
+fi
+
+COMMIT="$(git rev-parse --short HEAD)"
+echo "commit: $COMMIT"
+
 ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$REMOTE" \
   "set -eu; mkdir -p '$REMOTE_DIR'; if [ \"\$(find '$REMOTE_DIR' -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)\" ]; then cp -al '$REMOTE_DIR' '${REMOTE_DIR}_before_deploy_'\$(date +%Y%m%d_%H%M%S); fi"
 
-rsync -az --delete \
-  --exclude='.git/' \
-  --exclude='node_modules/' \
-  --exclude='.next/' \
-  --exclude='.env' \
-  --exclude='.env.*' \
-  --exclude='.DS_Store' \
-  --exclude='_handoff/' \
-  --exclude='.playwright-cli/' \
-  -e "ssh -p $PORT -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new" \
-  ./ "$REMOTE:$REMOTE_DIR/"
+git archive --format=tar HEAD | ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$REMOTE" \
+  "set -eu; tar -xf - -C '$REMOTE_DIR'"
 
 ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$REMOTE" \
   "set -eu; cd '$REMOTE_DIR' && npm install && npm run build && if pm2 describe mfm-prokopa >/dev/null 2>&1; then pm2 restart mfm-prokopa --update-env; else pm2 start node_modules/next/dist/bin/next --name mfm-prokopa -- start -H 127.0.0.1 -p '$APP_PORT'; fi && pm2 save && curl -I --max-time 10 http://127.0.0.1:$APP_PORT/"
